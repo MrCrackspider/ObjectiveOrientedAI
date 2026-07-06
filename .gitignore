@@ -1,0 +1,28 @@
+# Ignore everything
+*
+
+# Don't ignore directories, so we can recurse into them
+!*/
+
+# Ignore Intermediate folders though
+**/Intermediate/*
+**/Generated/*
+**/Binaries/*
+**/DerivedDataCache/*
+**/Saved/*
+**/Build/*
+**/.idea/*
+**/.vs/*
+
+# Don't ignore .gitignore and code
+!.gitignore
+!*.uplugin
+!*.cs
+!*.h
+!*.hpp
+!*.c
+!*.cpp
+!*.cc
+!*.inc
+!*.inl
+!*.lib
