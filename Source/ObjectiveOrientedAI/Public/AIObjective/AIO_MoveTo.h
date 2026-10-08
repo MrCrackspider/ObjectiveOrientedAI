@@ -26,6 +26,10 @@ class OBJECTIVEORIENTEDAI_API UAIO_MoveTo : public UAIObjective
 	
 public:
 
+#if WITH_EDITOR
+	virtual FText GetDebugDescription_Implementation() const override;
+#endif
+
 	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
 	AActor* TargetActor = nullptr;
 	

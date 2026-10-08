@@ -17,9 +17,6 @@ public:
 	UInstancedObjectiveComponent();
 
 	virtual void BeginPlay() override;
-
-	UPROPERTY(EditAnywhere, Category = "AI Objective")
-	bool bAutoStart = false;
 	
 	UPROPERTY(EditAnywhere, Instanced, Category = "AI Objective", BlueprintReadWrite)
 	TObjectPtr<UAIObjective> Objective;

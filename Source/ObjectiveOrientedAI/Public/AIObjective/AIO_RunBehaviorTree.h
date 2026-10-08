@@ -20,9 +20,22 @@ class OBJECTIVEORIENTEDAI_API UAIO_RunBehaviorTree : public UAIObjective
 	virtual void OnStarted_Implementation(bool bWasQueued) override;
 	virtual void OnStopped_Implementation(const FStopReasonType& StopReason) override;
 
+public:
+
+	/**
+	 * Creates an objective which runs a behavior tree. The objective comes back unowned and is only
+	 * kept alive by the caller, so add it to a container in the same scope
+	 * @param InBehaviorTree Tree to run
+	 */
+	static UAIO_RunBehaviorTree* MakeInstance(UBehaviorTree* InBehaviorTree);
+
+#if WITH_EDITOR
+	virtual FText GetDebugDescription_Implementation() const override;
+#endif
+
 protected:
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Run Behavior Tree", meta = (ExposeOnSpawn))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Run Behavior Tree", meta = (ExposeOnSpawn))
 	TObjectPtr<UBehaviorTree> BehaviorTree;
-	
+
 };

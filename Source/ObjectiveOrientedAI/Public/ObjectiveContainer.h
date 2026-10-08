@@ -1,8 +1,10 @@
 #pragma once
 
+#include "EngineDefines.h"
+
 #include "ObjectiveContainer.generated.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(ObjectiveOrientedAI, Log, All);
+OBJECTIVEORIENTEDAI_API DECLARE_LOG_CATEGORY_EXTERN(ObjectiveOrientedAI, Log, All);
 
 struct FGameplayTagQuery;
 struct FObjectiveContainer;
@@ -10,38 +12,148 @@ struct FGameplayTagContainer;
 class UAIObjective;
 class UObjectiveComponent;
 
+UENUM(BlueprintType)
+enum class EAIObjectiveStopReason : uint8
+{
+	Queued			UMETA(Tooltip = "Objective was queued"),
+	Failed			UMETA(Tooltip = "Objective invalidated with failure"),
+	Succeeded		UMETA(Tooltip = "Objective invalidated with success"),
+	Cancelled		UMETA(Tooltip = "Objective was cancelled by other objective"),
+	Restarting		UMETA(Tooltip = "Objective is restarting")
+};
+
+USTRUCT(Blueprintable)
+struct FStopReasonType
+{
+	GENERATED_BODY()
+
+	FStopReasonType() = default;
+	FStopReasonType(EAIObjectiveStopReason InReason) : Reason(InReason) {}
+
+	UPROPERTY(BlueprintReadOnly, Category = "AI Objective")
+	EAIObjectiveStopReason Reason = EAIObjectiveStopReason::Failed;
+	
+	OBJECTIVEORIENTEDAI_API bool IsCompleted() const;
+	OBJECTIVEORIENTEDAI_API bool IsSucceeded() const;
+	OBJECTIVEORIENTEDAI_API bool WasQueued() const;
+	// TODO: Deprecate 
+	OBJECTIVEORIENTEDAI_API bool IsPendingInvalidation() const;
+	OBJECTIVEORIENTEDAI_API bool IsRestarting() const;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnObjectiveStoppedSignature, UAIObjective*, AIObjective, const FStopReasonType&, StopReason);
+
+using FObjectiveStoppedDelegate = FOnObjectiveStoppedSignature::FDelegate;
+
+namespace ObjectiveDelegates
+{
+	/**
+	 * Builds a stopped callback out of an object and one of its UFUNCTIONs.
+	 *
+	 * Not called directly: MakeStoppedDelegate below is what supplies the reflected name, exactly as
+	 * BindDynamic does for a delegate which already exists
+	 */
+	template <typename UserClass>
+	FObjectiveStoppedDelegate MakeStopped(UserClass* Object,
+		typename FObjectiveStoppedDelegate::TMethodPtrResolver<UserClass>::FMethodPtr Method, FName FunctionName)
+	{
+		FObjectiveStoppedDelegate Delegate;
+		Delegate.__Internal_BindDynamic(Object, Method, FunctionName);
+
+		return Delegate;
+	}
+}
+
+/**
+ * A stopped callback, bound and ready to be handed to AddObjective in the same expression.
+ *
+ * A dynamic delegate can only be bound through a macro, since the function's reflected name comes from
+ * stringifying it at the call site - which is also why one cannot simply be constructed inline. This is
+ * that macro the other way round: it yields the delegate rather than binding one already declared
+ *
+ * @param UserObject Object holding the function
+ * @param FuncName Address of a member UFUNCTION, in the form &UClassName::FunctionName
+ */
+#define MakeStoppedDelegate(UserObject, FuncName) \
+	ObjectiveDelegates::MakeStopped(UserObject, FuncName, STATIC_FUNCTION_FNAME(#FuncName))
+
+#if WITH_GAMEPLAY_DEBUGGER_MENU
+
+/** 
+ * Snapshot of one objective container, rendered by the gameplay debugger as an indented tree
+ */
 struct FDebugInfo
 {
-	FDebugInfo() {}
-	
+	FDebugInfo() = default;
+
 	explicit FDebugInfo(const FObjectiveContainer& InObjectiveContainer);
 
-	FDebugInfo(const FDebugInfo& Other);
-
-	FDebugInfo& SetOwnerName(FString&& InName);
-
-	FDebugInfo& Tabulate();
+	/** Name shown for whatever owns the container: the objective component or the parent objective */
+	FDebugInfo& SetOwnerName(FString InName);
 
 	void Clear();
-	
-	FString ToString();
-	
-	FDebugInfo& operator=(FDebugInfo& Other);
 
-	FDebugInfo& operator=(FDebugInfo&& Other);
-	
+	FString ToString() const;
+
 private:
+
+	void AppendTo(FString& OutString, int32 IndentLevel) const;
+
+	static void AppendGroup(FString& OutString, int32 IndentLevel, FStringView Header, const TArray<FDebugInfo>& Objectives);
+	static void AppendLine(FString& OutString, int32 IndentLevel, FStringView Line);
+
 	FString OwnerName;
-	FString CurrentObjectivesLine = "Current:";
-	TArray<FDebugInfo> CurrentObjectivesInfo;
-	FString StackedObjectivesLine = "Pending:";
-	TArray<FDebugInfo> StackedObjectivesInfo;
+
+	// Owning container is paused, so its current objectives are not actually running
+	bool bQueued = false;
+
+	TArray<FDebugInfo> CurrentObjectives;
+	TArray<FDebugInfo> QueuedObjectives;
 };
+
+#endif // WITH_GAMEPLAY_DEBUGGER_MENU
 
 struct FNullInitializer
 {
 	template<typename TObject>
 	void operator()(TObject*) const {}
+};
+
+/** 
+ * Result of an attempt to add an objective to a container.
+ */
+USTRUCT()
+struct FObjectiveActivationResult
+{
+	GENERATED_BODY()
+
+	FObjectiveActivationResult() = default;
+
+	static FObjectiveActivationResult Activated(UAIObjective* InObjective) { return FObjectiveActivationResult(InObjective, true); }
+
+	/** True if the objective was accepted by the container and was either started or queued */
+	bool WasActivated() const { return bActivated; }
+
+	/** Activated objective, or null if activation failed or the objective invalidated itself while activating */
+	OBJECTIVEORIENTEDAI_API UAIObjective* GetObjective() const;
+
+	/** Typed version of GetObjective() */
+	template<typename T>
+	T* GetObjective() const { return Cast<T>(GetObjective()); }
+
+	/** True if the objective was activated but did not survive activation, i.e. it invalidated itself from OnStarted */
+	OBJECTIVEORIENTEDAI_API bool WasInvalidatedDuringActivation() const;
+
+	explicit operator bool() const { return WasActivated(); }
+
+private:
+
+	FObjectiveActivationResult(UAIObjective* InObjective, bool bInActivated) : Objective(InObjective), bActivated(bInActivated) {}
+
+	UPROPERTY()
+	TObjectPtr<UAIObjective> Objective = nullptr;
+
+	bool bActivated = false;
 };
 
 
@@ -54,6 +166,25 @@ struct FObjectiveContainer
 	const TArray<TObjectPtr<UAIObjective>>& GetQueuedObjectives() const { return QueuedObjectives; }
 	FObjectiveContainer* GetOwningContainer() const { return OwningContainer; }
 	bool IsQueued() const { return bQueued; }
+
+	// How far down the objective tree this container sits. The objective component's own container is zero
+	int32 GetNestingLevel() const;
+
+#if ENABLE_VISUAL_LOG
+
+	/**
+	 * Whether this container is shallow enough to report to the visual log, per the nesting depth in the
+	 * project settings
+	 */
+	bool ShouldVisualLog() const;
+
+	/**
+	 * What the container holds right now, as indented lines to hang under a log headline. Empty groups are
+	 * left out, so a container holding nothing adds nothing
+	 */
+	FString GetStateString() const;
+
+#endif // ENABLE_VISUAL_LOG
 	
 	TArray<UAIObjective*> GetObjectivesByTag(const FGameplayTagContainer& InTags) const;
 	TArray<UAIObjective*> GetObjectivesByTagQuery(const FGameplayTagQuery& Query) const;
@@ -62,71 +193,137 @@ struct FObjectiveContainer
 	
 	UAIObjective* TryCreateAIObjective(UObjectiveComponent* ObjectiveComponent, TSubclassOf<UAIObjective> Class) const;
 	
-	UAIObjective* AddObjective(UObjectiveComponent* ObjectiveComponent, UAIObjective* AIObjective, bool bMakeCopy = false);
-	UAIObjective* AddObjective(UObjectiveComponent* ObjectiveComponent, TSubclassOf<UAIObjective> AIObjectiveClass);
-	UAIObjective* AddObjective(UObjectiveComponent* ObjectiveComponent, TSubclassOf<UAIObjective> AIObjectiveClass, TFunctionRef<void(UAIObjective*)> Initializer);
-	
+	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, 
+		UAIObjective* AIObjective, bool bMakeCopy = false, FObjectiveStoppedDelegate OnStopped = {});
+	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, 
+		TSubclassOf<UAIObjective> AIObjectiveClass, FObjectiveStoppedDelegate OnStopped = {});
+	/**
+	 * Creates an objective of the given class and adds it. Every other way of adding one from a class,
+	 * the templated overload below included, comes through here
+	 * @param Initializer Runs on the new objective after it is initialized and before it activates
+	 */
+	OBJECTIVEORIENTEDAI_API FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent,
+		TSubclassOf<UAIObjective> AIObjectiveClass, TFunctionRef<void(UAIObjective*)> Initializer, FObjectiveStoppedDelegate OnStopped = {});
+
 	template<class T, typename InitializerFunc = FNullInitializer>
-	T* AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerFunc&& Initializer = {});
+	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerFunc&& Initializer = {}, FObjectiveStoppedDelegate OnStopped = {});
 	
 	void ClearObjectives();
 	void ClearObjectives(const FGameplayTagQuery& Query);
 	void ClearObjectives(const FGameplayTagContainer& Tags);
 	
-	void SetQueued(bool bNewQueued);
-	
 private:
 	
 	friend UAIObjective;
+	friend UObjectiveComponent;
+	
+	void SetQueued(bool bNewQueued);
 	
 	void InvalidateObjective(UAIObjective* AIObjective, bool bSuccess);
-	
+
 	static TArray<UAIObjective*> GetObjectivesByTag(const TArray<UAIObjective*>& AIObjectives, const FGameplayTagContainer& InTags);
-	
-	OBJECTIVEORIENTEDAI_API bool CanAddObjective(const UObjectiveComponent* ObjectiveComponent, const UAIObjective* AIObjective, bool* OutBlocked = nullptr) const;
-	bool ShouldObjectiveBeBlocked(TNotNull<const UAIObjective*> InObjective) const;
-	bool ShouldObjectiveBeQueued(TNotNull<const UAIObjective*> InObjective) const;
-	
-	OBJECTIVEORIENTEDAI_API UAIObjective* ActivateObjective(UAIObjective* InAIObjective);
-	void ReevaluateQueue(const UObject* LogOwner = nullptr);
-	
+
+	bool CanAddObjective(const UObjectiveComponent* ObjectiveComponent, const UAIObjective* AIObjective) const;
+
+	// The running objective whose definition refuses this one, or null when nothing is holding it out
+	const UAIObjective* FindBlockingObjective(TNotNull<const UAIObjective*> InObjective) const;
+
+	// True while an objective can still take part in anything: valid, and not on its way out
+	static bool IsObjectiveValid(const UAIObjective* InObjective);
+
+	/**
+	 * Brings an objective which has never been initialized all the way up: it is given its component,
+	 * handed to the caller's initializer, asked whether it can activate, and then activated. Every step
+	 * runs user code which is free to invalidate it, so it is rechecked on the way through
+	 */
+	FObjectiveActivationResult AddNewObjective(UObjectiveComponent* ObjectiveComponent, UAIObjective* InObjective,
+		TFunctionRef<void(UAIObjective*)> Initializer, const FObjectiveStoppedDelegate& OnStopped);
+
+	/**
+	 * Adds an objective which is already initialized, so it is being re-added rather than created. One
+	 * which is waiting stays where it is, one which is running restarts, and one which is held by
+	 * nothing goes through activation again
+	 */
+	FObjectiveActivationResult AddInitializedObjective(UObjectiveComponent* ObjectiveComponent, UAIObjective* InObjective,
+		const FObjectiveStoppedDelegate& OnStopped);
+
+	FObjectiveActivationResult ActivateObjective(UAIObjective* InAIObjective);
+
+	/**
+	 * Applies the enqueue rules to everything the container holds and brings the objectives in line with
+	 * the outcome: whatever is no longer held back starts, whatever is now held back steps into the
+	 * queue. Objectives already in the state they resolved to are left untouched
+	 */
+	void ReevaluateQueue(TWeakObjectPtr<const UObject> LogOwner = nullptr);
+
+	/**
+	 * Works out which objectives may run side by side. An objective is held back whenever any other
+	 * objective which would be running has a definition whose enqueue rule matches its tags
+	 * @param OutToRun	 Objectives which should be running, in priority order
+	 * @param OutToQueue Objectives which should be waiting, the first one to resume at the front
+	 */
+	void ResolveEnqueueRules(TArray<TObjectPtr<UAIObjective>>& OutToRun, TArray<TObjectPtr<UAIObjective>>& OutToQueue) const;
+
+	// Index of the lowest priority candidate which another candidate wants queued, or INDEX_NONE
+	static int32 FindHeldBackCandidate(const TArray<TObjectPtr<UAIObjective>>& Candidates);
+
+	// Appends the objectives which are still able to run or wait, skipping the ones on their way out
+	static void AppendValidObjectives(TArray<TObjectPtr<UAIObjective>>& OutObjectives, const TArray<TObjectPtr<UAIObjective>>& SourceObjectives);
+
+	// Subscribe OnStopped, if bound, to the objective's stopped event
+	static void BindStoppedCallback(UAIObjective* InObjective, const FObjectiveStoppedDelegate& OnStopped);
+
+	// Moves every objective matching Predicate out of SourceObjectives, keeping the order of both arrays
+	template<typename PredicateType>
+	static void ObtainObjectives(TArray<TObjectPtr<UAIObjective>>& OutObjectives, TArray<TObjectPtr<UAIObjective>>& SourceObjectives, PredicateType Predicate);
+
 	// Get objectives and remove them from their containers
-	TArray<UAIObjective*> ObtainObjectivesByTag(const FGameplayTagContainer& Tags, TArray<TObjectPtr<UAIObjective>>& SourceObjectives, bool bPreserveOrder = true);
-	TArray<UAIObjective*> ObtainObjectivesByTag(const FGameplayTagContainer& Tags);
-	TArray<UAIObjective*> ObtainObjectivesByTagQuery(const FGameplayTagQuery& Query);
-	TArray<UAIObjective*> ObtainActivatableObjectives();
-	
-	static void StartObjectives(const TArray<UAIObjective*>& InObjectives);
-	static void DestroyObjectives(const TArray<UAIObjective*>& InObjectives, bool bActivationFailure = false);
-	static void EnqueueObjectives(const TArray<UAIObjective*>& InObjectives);
-	
-	static FString ObjectivesToString(const TArray<UAIObjective*>& Objectives);
-	
+	TArray<TObjectPtr<UAIObjective>> ObtainObjectivesByTag(const FGameplayTagContainer& Tags);
+	TArray<TObjectPtr<UAIObjective>> ObtainObjectivesByTagQuery(const FGameplayTagQuery& Query);
+
+	// The same, for the objectives InObjective's definition cancels on sight
+	TArray<TObjectPtr<UAIObjective>> ObtainObjectivesCancelledBy(const UAIObjective* InObjective);
+
+	// Start / enqueue a single objective. Invalidates it and returns false if it cannot be activated this way
+	static bool StartObjective(UAIObjective* InObjective);
+	static bool EnqueueObjective(UAIObjective* InObjective);
+
+	/**
+	 * Whether the container, as it stands right now, still means for this objective to run or to wait.
+	 * The batch helpers below walk a snapshot taken before any of it was applied, and the user code they
+	 * run is free to move an objective between the two arrays or drop it altogether, so every entry is
+	 * measured against the container again on its turn rather than trusted from the snapshot
+	 */
+	bool ShouldObjectiveRun(UAIObjective* InObjective) const;
+	bool ShouldObjectiveWait(UAIObjective* InObjective) const;
+
+	void StartObjectives(const TArray<TObjectPtr<UAIObjective>>& InObjectives) const;
+	static void DestroyObjectives(const TArray<TObjectPtr<UAIObjective>>& InObjectives, bool bActivationFailure = false);
+	void EnqueueObjectives(const TArray<TObjectPtr<UAIObjective>>& InObjectives) const;
+
 	FObjectiveContainer* OwningContainer = nullptr;
 	bool bQueued = false;
 	bool bCleaningDown = false;
 
+	// How deep reevaluation is nested. Starting an objective can lead straight back into this container
+	int32 ReevaluationDepth = 0;
+
 	UPROPERTY()
 	TArray<TObjectPtr<UAIObjective>> CurrentObjectives;
-	
+
 	UPROPERTY()
 	TArray<TObjectPtr<UAIObjective>> QueuedObjectives;
 };
 
 template <class T, typename InitializerType>
-T* FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerType&& Initializer)
+FObjectiveActivationResult FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
 {
-	if (!CanAddObjective(ObjectiveComponent, T::StaticClass()->template GetDefaultObject<T>()))
+	// All this adds over the class based overload is the caller's typed initializer, wrapped so the one
+	// path from a class to a running objective does not have to be a template itself
+	auto TypedInitializer = [&Initializer](UAIObjective* InObjective)
 	{
-		return nullptr;
-	}
-	
-	T* NewObjective = NewObject<T>(ObjectiveComponent);
-	NewObjective->Initialize(ObjectiveComponent);
-	Initializer(NewObjective);
-	if (!IsValid(NewObjective))
-	{
-		return nullptr;
-	}
-	return ActivateObjective(NewObjective);
+		Initializer(CastChecked<T>(InObjective));
+	};
+
+	return AddObjective(ObjectiveComponent, T::StaticClass(), TypedInitializer, MoveTemp(OnStopped));
 }

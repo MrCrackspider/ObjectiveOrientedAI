@@ -1,28 +1,30 @@
 
 #include "OOAIBlueprintHelperLibrary.h"
 
+#include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
 #include "ObjectiveComponent.h"
 #include "ObjectiveComponentOwnerInterface.h"
 
-UAIObjective* UOOAIBlueprintHelperLibrary::CreateObjectiveInstance(UObjectiveComponent* Target, TSubclassOf<UAIObjective> Class)
+UAIObjective* UOOAIBlueprintHelperLibrary::CreateObjectiveInstance(UObjectiveComponent* ObjectiveOwner, TSubclassOf<UAIObjective> Class)
 {
-	return IsValid(Target) ? Target->TryCreateAIObjective(Class) : nullptr;
+	return IsValid(ObjectiveOwner) ? ObjectiveOwner->TryCreateAIObjective(Class) : nullptr;
 }
 
-void UOOAIBlueprintHelperLibrary::AddObjective(UObjectiveComponent* Target, UAIObjective* TargetObjective)
+void UOOAIBlueprintHelperLibrary::AddObjective(UObjectiveComponent* ObjectiveOwner, UAIObjective* TargetObjective)
 {
-	if (IsValid(Target)) Target->AddObjective(TargetObjective);
+	if (IsValid(ObjectiveOwner)) ObjectiveOwner->AddObjective(TargetObjective);
 }
 
-UAIObjective* UOOAIBlueprintHelperLibrary::CreateSubObjectiveInstance(UAIObjective* Target, TSubclassOf<UAIObjective> Class)
+UAIObjective* UOOAIBlueprintHelperLibrary::CreateSubObjectiveInstance(UAIObjective* ObjectiveOwner, TSubclassOf<UAIObjective> Class)
 {
-	return IsValid(Target) ? Target->TryCreateSubObjective(Class) : nullptr;
+	return IsValid(ObjectiveOwner) ? ObjectiveOwner->TryCreateSubObjective(Class) : nullptr;
 }
 
-void UOOAIBlueprintHelperLibrary::AddSubObjective(UAIObjective* Target, UAIObjective* TargetObjective)
+void UOOAIBlueprintHelperLibrary::AddSubObjective(UAIObjective* ObjectiveOwner, UAIObjective* TargetObjective)
 {
-	if (!IsValid(Target) || !TargetObjective) return;
-	Target->AddSubObjective(TargetObjective);
+	if (!IsValid(ObjectiveOwner) || !TargetObjective) return;
+	ObjectiveOwner->AddSubObjective(TargetObjective);
 }
 
 UObjectiveComponent* UOOAIBlueprintHelperLibrary::GetObjectiveComponent(AActor* Actor)

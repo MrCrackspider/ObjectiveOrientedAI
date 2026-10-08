@@ -2,21 +2,38 @@
 #include "AIObjective/AIO_RunBehaviorTree.h"
 
 #include "AIController.h"
+#include "ObjectiveComponent.h"
+
+UAIO_RunBehaviorTree* UAIO_RunBehaviorTree::MakeInstance(UBehaviorTree* InBehaviorTree)
+{
+	UAIO_RunBehaviorTree* Objective = NewObject<UAIO_RunBehaviorTree>();
+
+	Objective->BehaviorTree = InBehaviorTree;
+
+	return Objective;
+}
+
+#if WITH_EDITOR
+FText UAIO_RunBehaviorTree::GetDebugDescription_Implementation() const
+{
+	return FText::FromString(BehaviorTree ? BehaviorTree->GetName() : TEXT("no tree"));
+}
+#endif
 
 bool UAIO_RunBehaviorTree::CanActivate_Implementation(const UObjectiveComponent* ObjectiveComponent) const
 {
-	return IsValid(BehaviorTree);
+	return IsValid(BehaviorTree) && ObjectiveComponent && ObjectiveComponent->GetAIOwner();
 }
 
 void UAIO_RunBehaviorTree::OnStarted_Implementation(bool bWasQueued)
 {
 	if (bWasQueued)
 	{
-		GetOwningController()->BrainComponent->ResumeLogic(FString::Printf(TEXT("AIO_RunBehaviorTree resumed")));
+		GetOwningAIController()->BrainComponent->ResumeLogic(FString::Printf(TEXT("AIO_RunBehaviorTree resumed")));
 	}
 	else
 	{
-		GetOwningController()->RunBehaviorTree(BehaviorTree);
+		GetOwningAIController()->RunBehaviorTree(BehaviorTree);
 	}
 }
 
@@ -24,10 +41,10 @@ void UAIO_RunBehaviorTree::OnStopped_Implementation(const FStopReasonType& StopR
 {
 	if (StopReason.WasQueued())
 	{
-		GetOwningController()->BrainComponent->PauseLogic(FString::Printf(TEXT("AIO_RunBehaviorTree was queued")));
+		GetOwningAIController()->BrainComponent->PauseLogic(FString::Printf(TEXT("AIO_RunBehaviorTree was queued")));
 	}
 	else
 	{
-		GetOwningController()->BrainComponent->StopLogic(FString::Printf(TEXT("AIO_RunBehaviorTree was stopped")));
+		GetOwningAIController()->BrainComponent->StopLogic(FString::Printf(TEXT("AIO_RunBehaviorTree was stopped")));
 	}
 }

@@ -2,39 +2,26 @@
 #include "AIObjective/AIObjective.h"
 
 #include "AIController.h"
+#include "AIObjective/AIObjectiveDefinition.h"
+#include "GameplayTasksComponent.h"
 #include "ObjectiveComponent.h"
+#include "VisualLogger/VisualLogger.h"
 
-AAIController* UAIObjective::GetOwningController() const
+AController* UAIObjective::GetOwningController() const
+{
+	return GetOwningComponent() ? GetOwningComponent()->GetOwningController() : nullptr;
+}
+
+AAIController* UAIObjective::GetOwningAIController() const
 {
 	return GetOwningComponent() ? GetOwningComponent()->GetAIOwner() : nullptr;
 }
 
 APawn* UAIObjective::GetControlledPawn() const
 {
-	AAIController* Controller = GetOwningController();
-	return Controller ? Controller->GetPawn() : nullptr;
-}
-
-bool FStopReasonType::WasQueued() const
-{
-	return Reason == EAIObjectiveStopReason::Queued;
-}
-
-bool FStopReasonType::IsSucceeded() const
-{
-	return Reason == EAIObjectiveStopReason::Succeeded;
-}
-
-bool FStopReasonType::IsPendingInvalidation() const
-{
-	return Reason == EAIObjectiveStopReason::Succeeded ||
-		Reason == EAIObjectiveStopReason::Failed ||
-		Reason == EAIObjectiveStopReason::Cancelled;
-}
-
-bool FStopReasonType::IsRestarting() const
-{
-	return Reason == EAIObjectiveStopReason::Restarting;
+	// Asked of the component rather than of the controller, because the component is what still knows the
+	// pawn while this objective is being stopped for having lost it
+	return GetOwningComponent() ? GetOwningComponent()->GetPawn() : nullptr;
 }
 
 UWorld* UAIObjective::GetWorld() const
@@ -44,8 +31,20 @@ UWorld* UAIObjective::GetWorld() const
 
 UGameplayTasksComponent* UAIObjective::GetGameplayTasksComponent(const UGameplayTask& Task) const
 {
-	AAIController* Controller = GetOwningController();
-	return Controller ? Controller->GetGameplayTasksComponent() : nullptr;
+	// An AI controller caches a component of its own, which it puts on the pawn as it possesses it, so that
+	// one answers first and the AI case keeps working exactly as it did
+	if (const AAIController* AIController = GetOwningAIController())
+	{
+		if (UGameplayTasksComponent* AITasksComponent = AIController->GetGameplayTasksComponent())
+		{
+			return AITasksComponent;
+		}
+	}
+
+	// Every other controller is asked for one directly, which is where the objective component puts the one
+	// it is allowed to add
+	const AController* Controller = GetOwningController();
+	return Controller ? Controller->FindComponentByClass<UGameplayTasksComponent>() : nullptr;
 }
 
 AActor* UAIObjective::GetGameplayTaskOwner(const UGameplayTask* Task) const
@@ -60,22 +59,80 @@ AActor* UAIObjective::GetGameplayTaskAvatar(const UGameplayTask* Task) const
 
 void UAIObjective::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
 {
-	TagContainer = ObjectiveTags;
+	TagContainer = GetAllObjectiveTags();
 }
 
 bool UAIObjective::HasMatchingGameplayTag(FGameplayTag TagToCheck) const
 {
-	return ObjectiveTags.HasTag(TagToCheck);
+	return ObjectiveTags.HasTag(TagToCheck)
+		|| (IsValid(Definition) && Definition->GetDefinitionTags().HasTag(TagToCheck));
 }
 
 bool UAIObjective::HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const
 {
-	return ObjectiveTags.HasAll(TagContainer);
+	// The two sets have to be answered together rather than one after the other: neither one holding all
+	// of the tags on its own says nothing about whether the objective carries them between them
+	return GetAllObjectiveTags().HasAll(TagContainer);
 }
 
 bool UAIObjective::HasAnyMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const
 {
-	return ObjectiveTags.HasAny(TagContainer);
+	return HasAnyObjectiveTags(TagContainer);
+}
+
+UAIObjectiveDefinition* UAIObjective::GetDefinition() const
+{
+	return Definition;
+}
+
+UAIObjective* UAIObjective::SetDefinition(UAIObjectiveDefinition* InDefinition)
+{
+	Definition = InDefinition;
+
+	return this;
+}
+
+FGameplayTagContainer UAIObjective::GetAllObjectiveTags() const
+{
+	FGameplayTagContainer AllTags = ObjectiveTags;
+
+	if (IsValid(Definition))
+	{
+		AllTags.AppendTags(Definition->GetDefinitionTags());
+	}
+
+	return AllTags;
+}
+
+bool UAIObjective::HasAnyObjectiveTags(const FGameplayTagContainer& InTags) const
+{
+	// Answered against each set in turn, since a single match anywhere is enough. That is what keeps the
+	// rule checks below off the merged container, which would have to be built for every pair of objectives
+	return ObjectiveTags.HasAny(InTags)
+		|| (IsValid(Definition) && Definition->HasAnyTags(InTags));
+}
+
+bool UAIObjective::MatchesObjectiveTagQuery(const FGameplayTagQuery& Query) const
+{
+	return GetAllObjectiveTags().MatchesQuery(Query);
+}
+
+bool UAIObjective::ShouldCancelObjective(const UAIObjective* InObjective) const
+{
+	return IsValid(Definition) && IsValid(InObjective)
+		&& InObjective->HasAnyObjectiveTags(Definition->GetCancelDefinitionsWithTags());
+}
+
+bool UAIObjective::ShouldBlockObjective(const UAIObjective* InObjective) const
+{
+	return IsValid(Definition) && IsValid(InObjective)
+		&& InObjective->HasAnyObjectiveTags(Definition->GetBlockDefinitionsWithTags());
+}
+
+bool UAIObjective::ShouldQueueObjective(const UAIObjective* InObjective) const
+{
+	return IsValid(Definition) && IsValid(InObjective)
+		&& InObjective->HasAnyObjectiveTags(Definition->GetEnqueueDefinitionsWithTags());
 }
 
 bool UAIObjective::IsQueued() const
@@ -94,7 +151,17 @@ void UAIObjective::Invalidate(bool bSuccess)
 #if WITH_GAMEPLAY_DEBUGGER_MENU
 FDebugInfo UAIObjective::GetDebugInfo() const
 {
-	return FDebugInfo(ObjectiveContainer).SetOwnerName(GetName());
+	FString DisplayName = GetName();
+
+#if WITH_EDITOR
+	const FText Description = GetDebugDescription();
+	if (!Description.IsEmpty())
+	{
+		DisplayName += TEXT(" - ") + Description.ToString();
+	}
+#endif
+
+	return FDebugInfo(ObjectiveContainer).SetOwnerName(MoveTemp(DisplayName));
 }
 #endif
 
@@ -130,12 +197,18 @@ bool UAIObjective::CanAddSubObjective(const UAIObjective* InObjective) const
 
 bool UAIObjective::Initialize(UObjectiveComponent* ObjectiveComponent)
 {
+	const FNullInitializer NullInitializer;
+	return Initialize(ObjectiveComponent, NullInitializer);
+}
+
+bool UAIObjective::Initialize(UObjectiveComponent* ObjectiveComponent, TFunctionRef<void(UAIObjective*)> Initializer)
+{
 	if (!IsValid(ObjectiveComponent))
 	{
 		UE_LOG(ObjectiveOrientedAI, Warning, TEXT("UAIObjective::Initialize: Attempt to initialize objective (%s) with invalid component."), *GetName());
 		return false;
 	}
-	
+
 	if (IsInitialized() && OwningComponent != ObjectiveComponent)
 	{
 		UE_LOG(ObjectiveOrientedAI, Warning, TEXT("Attempt to initialize objective (%s) initialized with different component (Objective component: %s, current component: %s)."),
@@ -143,13 +216,26 @@ bool UAIObjective::Initialize(UObjectiveComponent* ObjectiveComponent)
 		return false;
 	}
 
-	if (!IsInitialized())
+	if (IsInitialized())
 	{
-		Rename(nullptr, ObjectiveComponent);
-		OwningComponent = ObjectiveComponent;
-		OnInitialized();
+		return true;
 	}
-	
+
+	Rename(nullptr, ObjectiveComponent);
+	OwningComponent = ObjectiveComponent;
+
+	// The objective knows its component from here on, so the setup below can already reach the pawn,
+	// and OnInitialized runs on an objective which holds every variable it was given
+	Initializer(this);
+
+	// Setting an objective up is user code and may well be the last thing it ever does
+	if (!IsValid(this))
+	{
+		return false;
+	}
+
+	OnInitialized();
+
 	return true;
 }
 
@@ -170,9 +256,28 @@ void UAIObjective::Start()
 
 		bRestarting = true;
 
-		UE_LOG(ObjectiveOrientedAI, Display, TEXT("Restarting objective (%s)"), *GetName());
+#if ENABLE_VISUAL_LOG
+		// Measured on the container holding this objective, not on its own: this objective's activity
+		// belongs to the level it sits in, while its container is a level further down
+		const FObjectiveContainer* HoldingContainer = ObjectiveContainer.GetOwningContainer();
+
+		if (HoldingContainer && HoldingContainer->ShouldVisualLog())
+		{
+			UE_VLOG(GetOwningComponent(), ObjectiveOrientedAI, Display, TEXT("Restarting objective (%s)"), *GetName());
+		}
+#endif
+
+		if (bResetSubobjectivesOnRestart)
+		{
+			ObjectiveContainer.ClearObjectives();
+		}
 		
 		OnStopped(EAIObjectiveStopReason::Restarting);
+
+		if (IsPendingInvalidation())
+		{
+			return;
+		}
 	}
 
 	const bool bWasQueued = IsQueued() && WasEverStarted();
@@ -187,7 +292,14 @@ void UAIObjective::Start()
 	}
 
 	ObjectiveContainer.SetQueued(false);
-	
+
+	// Resuming the sub objectives runs their user code, which is free to invalidate this objective.
+	// It has already been through OnStopped and OnInvalidated by then, so there is nothing left to start
+	if (IsPendingInvalidation())
+	{
+		return;
+	}
+
 	OnStarted(bWasQueued);
 }
 
@@ -208,14 +320,16 @@ void UAIObjective::Enqueue()
 	UE_LOG(ObjectiveOrientedAI, Display, TEXT("%s was queued."), *GetName());
 
 	ObjectiveContainer.SetQueued(true);
-	
-	if (!WasEverStarted())
+
+	// Pausing the sub objectives runs their user code, which is free to invalidate this objective. That
+	// already reported the stop, so reporting a queueing on top of it would be a second stop
+	if (!WasEverStarted() || IsPendingInvalidation())
 	{
 		return;
 	}
-	
+
 	OnStopped(EAIObjectiveStopReason::Queued);
-	
+
 	OnObjectiveStoppedEvent.Broadcast(this, EAIObjectiveStopReason::Queued);
 }
 
@@ -242,16 +356,16 @@ void UAIObjective::Destroy(const FStopReasonType& StopReason)
 
 UAIObjective* UAIObjective::BPAddSubObjective(UAIObjective* InAIObjective, bool bMakeCopy)
 {
-	return AddSubObjective(InAIObjective, bMakeCopy);
+	return AddSubObjective(InAIObjective, bMakeCopy).GetObjective();
 }
 
-UAIObjective* UAIObjective::AddSubObjective(UAIObjective* InAIObjective, bool bMakeCopy)
+FObjectiveActivationResult UAIObjective::AddSubObjective(UAIObjective* InAIObjective, bool bMakeCopy, FObjectiveStoppedDelegate OnStopped)
 {
 	if (CanAddSubObjective(InAIObjective))
 	{
-		return ObjectiveContainer.AddObjective(GetOwningComponent(), InAIObjective, bMakeCopy);
+		return ObjectiveContainer.AddObjective(GetOwningComponent(), InAIObjective, bMakeCopy, MoveTemp(OnStopped));
 	}
-	return nullptr;
+	return {};
 }
 
 void UAIObjective::ClearSubObjectives()

@@ -2,11 +2,30 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Kismet/BlueprintFunctionLibrary.h"
 
 #include "OOAIBlueprintHelperLibrary.generated.h"
 
 class UObjectiveComponent;
 class UAIObjective;
+
+USTRUCT(BlueprintType, meta = (ShowOnlyInnerProperties))
+struct FAIObjectiveReference
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Instanced)
+	TObjectPtr<UAIObjective> Objective;
+};
+
+USTRUCT(BlueprintType, meta = (ShowOnlyInnerProperties))
+struct FAIObjectiveReferenceArray
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Instanced)
+	TArray<TObjectPtr<UAIObjective>> Objectives;
+};
 
 UENUM(BlueprintType)
 enum class EAIObjectiveStatus : uint8
@@ -30,17 +49,17 @@ public:
 	static void SwitchOnStatus(UAIObjective* Target, EAIObjectiveStatus& ObjectiveStatus);
 	
 	// K2Node_AddObjective utils
-	
-	UFUNCTION(BlueprintCallable, Category = "OOAI", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "Target", WorldContext = "Target"))
-	static UAIObjective* CreateObjectiveInstance(UObjectiveComponent* Target, TSubclassOf<UAIObjective> Class);
-	
-	UFUNCTION(BlueprintCallable, Category = "OOAI", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "Target", WorldContext = "Target"))
-	static UAIObjective* CreateSubObjectiveInstance(UAIObjective* Target, TSubclassOf<UAIObjective> Class);
 
-	UFUNCTION(BlueprintCallable, Category = "OOAI", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "Target", WorldContext = "Target"))
-	static void AddObjective(UObjectiveComponent* Target, UAIObjective* TargetObjective);
+	UFUNCTION(BlueprintCallable, Category = "OOAI", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "ObjectiveOwner", WorldContext = "ObjectiveOwner"))
+	static UAIObjective* CreateObjectiveInstance(UObjectiveComponent* ObjectiveOwner, TSubclassOf<UAIObjective> Class);
 
-	UFUNCTION(BlueprintCallable, Category = "OOAI", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "Target", WorldContext = "Target"))
-	static void AddSubObjective(UAIObjective* Target, UAIObjective* TargetObjective);
+	UFUNCTION(BlueprintCallable, Category = "OOAI", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "ObjectiveOwner", WorldContext = "ObjectiveOwner"))
+	static UAIObjective* CreateSubObjectiveInstance(UAIObjective* ObjectiveOwner, TSubclassOf<UAIObjective> Class);
+
+	UFUNCTION(BlueprintCallable, Category = "OOAI", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "ObjectiveOwner", WorldContext = "ObjectiveOwner"))
+	static void AddObjective(UObjectiveComponent* ObjectiveOwner, UAIObjective* TargetObjective);
+
+	UFUNCTION(BlueprintCallable, Category = "OOAI", meta = (BlueprintInternalUseOnly = "true", DefaultToSelf = "ObjectiveOwner", WorldContext = "ObjectiveOwner"))
+	static void AddSubObjective(UAIObjective* ObjectiveOwner, UAIObjective* TargetObjective);
 	
 };

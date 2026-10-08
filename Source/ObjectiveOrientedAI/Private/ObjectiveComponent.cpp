@@ -1,37 +1,104 @@
-﻿// © Volga Studios. All rights reserved.
-
-
+﻿
 #include "ObjectiveComponent.h"
 
-#include "AIController.h"
+#include "GameplayTasksComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Controller.h"
+#include "Navigation/PathFollowingComponent.h"
+
+namespace ObjectiveComponentUtils
+{
+	/**
+	 * Adds a component of this class to the controller, or nothing at all when it already has one. The new
+	 * component is left unnamed so that it can never collide with a subobject the controller declared itself
+	 * @return The component which was added, or null when the controller already had one
+	 */
+	template <typename ComponentType>
+	ComponentType* AddComponentIfMissing(AController& Controller)
+	{
+		if (Controller.FindComponentByClass<ComponentType>())
+		{
+			return nullptr;
+		}
+
+		ComponentType* NewComponent = NewObject<ComponentType>(&Controller);
+		NewComponent->RegisterComponent();
+
+		return NewComponent;
+	}
+}
 
 void UObjectiveComponent::OnRegister()
 {
 	Super::OnRegister();
-	if (AIOwner)
+	
+	OwningController = Cast<AController>(GetOwner());
+
+	if (OwningController)
 	{
-		AIOwner->OnPossessedPawnChanged.AddDynamic(this, &ThisClass::OnPossessedPawnChanged);
+		OwningController->OnPossessedPawnChanged.AddDynamic(this, &ThisClass::OnPossessedPawnChanged);
+		AddRequestedControllerComponents();
 	}
 }
 
 void UObjectiveComponent::OnUnregister()
 {
-	if (AIOwner)
+	if (OwningController)
 	{
-		AIOwner->OnPossessedPawnChanged.RemoveDynamic(this, &ThisClass::OnPossessedPawnChanged);
+		OwningController->OnPossessedPawnChanged.RemoveDynamic(this, &ThisClass::OnPossessedPawnChanged);
 	}
 	Super::OnUnregister();
 }
 
+void UObjectiveComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	ClearObjectives();
+	Super::EndPlay(EndPlayReason);
+}
+
+void UObjectiveComponent::AddRequestedControllerComponents()
+{
+	// Only worth adding to a controller which is about to run. Doing it in the editor would leave the
+	// components behind as part of the actor rather than as something built for one run of the game
+	const UWorld* World = GetWorld();
+
+	if (!World || !World->IsGameWorld())
+	{
+		return;
+	}
+
+	if (bCreatePathFollowingComponent)
+	{
+		if (UPathFollowingComponent* PathFollowing = ObjectiveComponentUtils::AddComponentIfMissing<UPathFollowingComponent>(*OwningController))
+		{
+			PathFollowing->Initialize();
+		}
+	}
+
+	if (bCreateGameplayTasksComponent)
+	{
+		ObjectiveComponentUtils::AddComponentIfMissing<UGameplayTasksComponent>(*OwningController);
+	}
+}
+
 APawn* UObjectiveComponent::GetPawn() const
 {
-	return GetAIOwner() ? GetAIOwner()->GetPawn() : nullptr;
+	if (OutgoingPawn)
+	{
+		return OutgoingPawn;
+	}
+
+	return OwningController ? OwningController->GetPawn() : nullptr;
 }
 
 void UObjectiveComponent::OnPossessedPawnChanged(APawn* OldPawn, APawn* NewPawn)
 {
 	if (OldPawn)
 	{
+		// The controller unpossesses before it broadcasts, so without this the objectives about to be
+		// stopped would ask for their pawn and be told there is none.
+		const TGuardValue<TObjectPtr<APawn>> PawnGuard(OutgoingPawn, OldPawn);
+
 		ClearObjectives();
 	}
 }
@@ -67,14 +134,14 @@ bool UObjectiveComponent::IsPaused() const
 	return ObjectiveContainer.IsQueued();
 }
 
-UAIObjective* UObjectiveComponent::AddObjective(UAIObjective* InAIObjective, bool bMakeCopy)
+FObjectiveActivationResult UObjectiveComponent::AddObjective(UAIObjective* InAIObjective, bool bMakeCopy, FObjectiveStoppedDelegate OnStopped)
 {
-	return ObjectiveContainer.AddObjective(this, InAIObjective, bMakeCopy);
+	return ObjectiveContainer.AddObjective(this, InAIObjective, bMakeCopy, MoveTemp(OnStopped));
 }
 
-UAIObjective* UObjectiveComponent::AddObjective(TSubclassOf<UAIObjective> ObjectiveClass)
+FObjectiveActivationResult UObjectiveComponent::AddObjective(TSubclassOf<UAIObjective> ObjectiveClass, FObjectiveStoppedDelegate OnStopped)
 {
-	return ObjectiveContainer.AddObjective(this, ObjectiveClass);
+	return ObjectiveContainer.AddObjective(this, ObjectiveClass, MoveTemp(OnStopped));
 }
 
 void UObjectiveComponent::ClearObjectivesWithTags(FGameplayTagContainer InTags)
@@ -89,12 +156,12 @@ void UObjectiveComponent::ClearObjectivesByTagQuery(FGameplayTagQuery TagQuery)
 
 UAIObjective* UObjectiveComponent::BPAddObjective(UAIObjective* InAIObjective, bool bMakeCopy)
 {
-	return AddObjective(InAIObjective, bMakeCopy);
+	return AddObjective(InAIObjective, bMakeCopy).GetObjective();
 }
 
-UAIObjective* UObjectiveComponent::AddObjective(TSubclassOf<UAIObjective> AIObjectiveClass, TFunctionRef<void(UAIObjective*)> Initializer)
+FObjectiveActivationResult UObjectiveComponent::AddObjective(TSubclassOf<UAIObjective> AIObjectiveClass, TFunctionRef<void(UAIObjective*)> Initializer, FObjectiveStoppedDelegate OnStopped)
 {
-	return ObjectiveContainer.AddObjective(this, AIObjectiveClass, Initializer);
+	return ObjectiveContainer.AddObjective(this, AIObjectiveClass, Initializer, MoveTemp(OnStopped));
 }
 
 void UObjectiveComponent::ClearObjectives()

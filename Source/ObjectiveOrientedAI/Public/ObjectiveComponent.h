@@ -1,5 +1,4 @@
-﻿// © Volga Studios. All rights reserved.
-
+﻿
 #pragma once
 
 #include "CoreMinimal.h"
@@ -8,21 +7,36 @@
 #include "AIObjective/AIObjective.h"
 #include "ObjectiveComponent.generated.h"
 
+class AController;
 
+/**
+ * Runs a tree of objectives.
+ */
 UCLASS(ClassGroup=(AI), meta=(BlueprintSpawnableComponent), DisplayName = "Objective Component")
 class OBJECTIVEORIENTEDAI_API UObjectiveComponent : public UBrainComponent
 {
 	GENERATED_BODY()
-	
+
 public:
-	
+
 	virtual void OnRegister() override;
 	virtual void OnUnregister() override;
-	
-	UFUNCTION(BlueprintPure, Category = "UObjective Component")
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/**
+	 * Controller this component runs on.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Objective Component")
+	AController* GetOwningController() const { return OwningController; }
+
+	/**
+	 * Pawn the objectives run on. Normally the controller's own, except while objectives are being stopped
+	 * because the pawn changed: there it stays the pawn they ran on, which is what they have work to undo on
+	 */
+	UFUNCTION(BlueprintPure, Category = "Objective Component")
 	APawn* GetPawn() const;
-	
-	UFUNCTION(BlueprintCallable, Category = "UObjective Component", meta = (DeterminesOutputType = "Class"))
+
+	UFUNCTION(BlueprintCallable, Category = "Objective Component", meta = (DeterminesOutputType = "Class"))
 	UAIObjective* TryCreateAIObjective(TSubclassOf<UAIObjective> Class);
 	
 	template <typename T>
@@ -39,13 +53,13 @@ public:
 	virtual bool IsPaused() const override;
 	// End UBrainComponent
 	
-	UFUNCTION(BlueprintCallable, Category = "UObjective Component")
+	UFUNCTION(BlueprintCallable, Category = "Objective Component")
 	void ClearObjectives();
 	
-	UFUNCTION(BlueprintCallable, Category = "UObjective Component")
+	UFUNCTION(BlueprintCallable, Category = "Objective Component")
 	void ClearObjectivesWithTags(FGameplayTagContainer InTags);
 	
-	UFUNCTION(BlueprintCallable, Category = "UObjective Component")
+	UFUNCTION(BlueprintCallable, Category = "Objective Component")
 	void ClearObjectivesByTagQuery(FGameplayTagQuery TagQuery);
 
 	/**
@@ -53,17 +67,19 @@ public:
 	 * Already active objective will be restarted
 	 * @param InAIObjective Objective instance to add to controller
 	 * @param bMakeCopy Will make a copy of input objective
-	 * @return Copied or input objective
+	 * @param OnStopped Optional callback subscribed to the added objective before it activates
+	 * @return Activation result. Convertible to bool to test activation, GetObjective() returns the copied or
+	 *         input objective, or null if it did not survive activation
 	 */
-	UAIObjective* AddObjective(UAIObjective* InAIObjective, bool bMakeCopy = false);
-	UAIObjective* AddObjective(TSubclassOf<UAIObjective> ObjectiveClass);
-	UAIObjective* AddObjective(TSubclassOf<UAIObjective> AIObjectiveClass, TFunctionRef<void(UAIObjective*)> Initializer);
-	
-	UFUNCTION(BlueprintCallable, Category = "UObjective Component", meta = (AdvancedDisplay = bMakeCopy), DisplayName = "Add Objective")
+	FObjectiveActivationResult AddObjective(UAIObjective* InAIObjective, bool bMakeCopy = false, FObjectiveStoppedDelegate OnStopped = {});
+	FObjectiveActivationResult AddObjective(TSubclassOf<UAIObjective> ObjectiveClass, FObjectiveStoppedDelegate OnStopped = {});
+	FObjectiveActivationResult AddObjective(TSubclassOf<UAIObjective> AIObjectiveClass, TFunctionRef<void(UAIObjective*)> Initializer, FObjectiveStoppedDelegate OnStopped = {});
+
+	UFUNCTION(BlueprintCallable, Category = "Objective Component", meta = (AdvancedDisplay = bMakeCopy), DisplayName = "Add Objective")
 	UAIObjective* BPAddObjective(UAIObjective* InAIObjective, bool bMakeCopy = false);
-	
+
 	template<class T, typename InitializerType = FNullInitializer>
-	T* AddObjective(InitializerType&& Initializer = {});
+	FObjectiveActivationResult AddObjective(InitializerType&& Initializer = {}, FObjectiveStoppedDelegate OnStopped = {});
 
 #if WITH_GAMEPLAY_DEBUGGER_MENU
 	FDebugInfo GetDebugInfo() const;
@@ -74,8 +90,34 @@ protected:
 	UFUNCTION()
 	void OnPossessedPawnChanged(APawn* OldPawn, APawn* NewPawn);
 
+	/**
+	 * Give the owning controller a path following component when it has none of its own.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Objective Component")
+	bool bCreatePathFollowingComponent = false;
+
+	/**
+	 * Give the owning controller a gameplay tasks component when it has none of its own.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Objective Component")
+	bool bCreateGameplayTasksComponent = false;
+
 private:
-	
+
+	/** Adds whichever  optional components has been asked for and the controller does not have */
+	void AddRequestedControllerComponents();
+
+	// Controller this component is a part of, cached as it registers
+	UPROPERTY(Transient)
+	TObjectPtr<AController> OwningController;
+
+	/**
+	 * Pawn on its way out, held only for as long as it takes to stop the objectives which were running on
+	 * it. Null at every other time, so it never answers for a pawn the controller no longer has
+	 */
+	UPROPERTY(Transient)
+	TObjectPtr<APawn> OutgoingPawn;
+
 	UPROPERTY()
 	FObjectiveContainer ObjectiveContainer;
 };
@@ -87,7 +129,7 @@ T* UObjectiveComponent::TryCreateAIObjective()
 }
 
 template <class T, typename InitializerType>
-T* UObjectiveComponent::AddObjective(InitializerType&& Initializer)
+FObjectiveActivationResult UObjectiveComponent::AddObjective(InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
 {
-	return ObjectiveContainer.AddObjective<T>(this, Forward<InitializerType>(Initializer));
+	return ObjectiveContainer.AddObjective<T>(this, Forward<InitializerType>(Initializer), MoveTemp(OnStopped));
 }

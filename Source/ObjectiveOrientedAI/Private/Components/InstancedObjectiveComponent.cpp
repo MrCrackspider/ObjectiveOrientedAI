@@ -7,11 +7,12 @@
 UInstancedObjectiveComponent::UInstancedObjectiveComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	bAutoActivate = false;
 }
 
 void UInstancedObjectiveComponent::BeginPlay()
 {
-	if (bAutoStart)
+	if (bAutoActivate)
 	{
 		if (UObjectiveComponent* ObjectiveComponent = UOOAIBlueprintHelperLibrary::GetObjectiveComponent(GetOwner()))
 		{
