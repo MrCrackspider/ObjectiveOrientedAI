@@ -211,7 +211,7 @@ FText UAIO_MoveTo::GetDebugDescription_Implementation() const
 }
 #endif
 
-bool UAIO_MoveTo::CanActivate_Implementation(const UObjectiveComponent* ObjectiveComponent) const
+bool UAIO_MoveTo::IsCompatibleWith_Implementation(const UObjectiveComponent* ObjectiveComponent) const
 {
 	const AController* Controller = ObjectiveComponent ? ObjectiveComponent->GetOwningController() : nullptr;
 
@@ -235,7 +235,7 @@ void UAIO_MoveTo::OnStarted_Implementation(bool bWasQueued)
 
 	if (!PathFollowing)
 	{
-		// CanActivate found one, so losing it between then and now means the controller is being taken apart
+		// IsCompatibleWith found one, so losing it between then and now means the controller is being taken apart
 		Invalidate(false);
 		return;
 	}

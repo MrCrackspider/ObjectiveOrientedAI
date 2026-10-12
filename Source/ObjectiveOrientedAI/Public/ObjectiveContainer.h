@@ -79,8 +79,8 @@ namespace ObjectiveDelegates
 
 #if WITH_GAMEPLAY_DEBUGGER_MENU
 
-/** 
- * Snapshot of one objective container, rendered by the gameplay debugger as an indented tree
+/**
+ * Snapshot of one objective container, rendered by the gameplay debugger as an indented, coloured tree
  */
 struct FDebugInfo
 {
@@ -91,18 +91,60 @@ struct FDebugInfo
 	/** Name shown for whatever owns the container: the objective component or the parent objective */
 	FDebugInfo& SetOwnerName(FString InName);
 
+	/** A labelled line of its own, printed under the owner's name and above any of its objectives */
+	FDebugInfo& AddDetail(FString InLabel, FString InValue);
+
+	//~ Begin what an objective adds about itself, printed on the same line as its name
+	FDebugInfo& SetDefinitionName(FString InName);
+	FDebugInfo& SetTags(FString InTags);
+	FDebugInfo& SetDescription(FString InDescription);
+	//~ End what an objective adds about itself
+
+	/** Nothing was collected at all, which is what an actor carrying no objective component gives */
+	bool IsEmpty() const;
+
 	void Clear();
 
 	FString ToString() const;
 
 private:
 
-	void AppendTo(FString& OutString, int32 IndentLevel) const;
+	/**
+	 * @param StateColor Colour the objective is drawn in, which is decided by the group it sits in rather
+	 *                   than by the objective, since the same objective reads differently once its
+	 *                   container is paused
+	 * @param Prefix	 Printed before the name, carrying the objective's place in its group
+	 */
+	void AppendTo(FString& OutString, int32 IndentLevel, const TCHAR* StateColor, const TCHAR* Prefix) const;
 
-	static void AppendGroup(FString& OutString, int32 IndentLevel, FStringView Header, const TArray<FDebugInfo>& Objectives);
+	// The single line this owner prints about itself, before its own objectives are printed under it
+	FString GetHeadline(const TCHAR* StateColor, const TCHAR* Prefix) const;
+
+	static void AppendGroup(FString& OutString, int32 IndentLevel, const TCHAR* HeaderColor, const TCHAR* Header,
+		const TCHAR* StateColor, const TArray<FDebugInfo>& Objectives);
 	static void AppendLine(FString& OutString, int32 IndentLevel, FStringView Line);
 
+	/** Takes out what the debugger would read as markup or as layout, leaving a name safe to print */
+	static FString Sanitize(FString InString);
+
 	FString OwnerName;
+
+	// What the objective owning this container is: its definition asset, its instance tags, its own say
+	FString DefinitionName;
+	FString Tags;
+	FString Description;
+
+	// Lines the owner has to say about itself, as label and value
+	TArray<TPair<FString, FString>> Details;
+
+	// Running objective whose rule is keeping this one waiting, empty unless a rule is what put it there
+	FString HeldBackBy;
+
+	// Objectives held under this one which the nesting depth preference left out of the snapshot
+	int32 TruncatedCount = 0;
+
+	// First in the queue, so the one which resumes next
+	bool bIsNext = false;
 
 	// Owning container is paused, so its current objectives are not actually running
 	bool bQueued = false;
@@ -169,6 +211,16 @@ struct FObjectiveContainer
 
 	// How far down the objective tree this container sits. The objective component's own container is zero
 	int32 GetNestingLevel() const;
+
+#if WITH_GAMEPLAY_DEBUGGER_MENU
+
+	/**
+	 * Whether this container is shallow enough for the gameplay debugger to draw what it holds, per the
+	 * nesting depth in the editor preferences
+	 */
+	bool ShouldGameplayDebug() const;
+
+#endif // WITH_GAMEPLAY_DEBUGGER_MENU
 
 #if ENABLE_VISUAL_LOG
 

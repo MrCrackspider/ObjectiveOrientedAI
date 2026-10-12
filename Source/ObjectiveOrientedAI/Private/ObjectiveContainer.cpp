@@ -49,13 +49,58 @@ bool FStopReasonType::IsRestarting() const
 
 namespace ObjectiveDebug
 {
-	// Tabs do not render on the debugger canvas, so indent with spaces
+	// Indented with spaces: the canvas turns a tab into five of them, which is too coarse for a deep tree
 	static constexpr int32 SpacesPerIndentLevel = 2;
+
+	/**
+	 * Colours for the debugger canvas, in the markup FGameplayDebuggerCanvasContext::Print reads: an
+	 * FColorList name in braces, which holds until the next one, across newlines included - so every line
+	 * states its own colour. Print silently drops anything in braces it cannot read as a colour, which is
+	 * what FDebugInfo::Sanitize is guarding against
+	 */
+	namespace Color
+	{
+		static constexpr const TCHAR* Owner = TEXT("{green}");
+
+		/**
+		 * The split the engine's own categories draw with, and the reason none of this is on a grey or a
+		 * near neutral: the wording which is on every line in white, and whatever differs per actor - a
+		 * name, a value, an objective's own account of itself - in yellow
+		 */
+		static constexpr const TCHAR* Label = TEXT("{white}");
+		static constexpr const TCHAR* Value = TEXT("{yellow}");
+
+		static constexpr const TCHAR* Tags = TEXT("{silver}");
+		static constexpr const TCHAR* Definition = TEXT("{skyblue}");
+		static constexpr const TCHAR* Next = TEXT("{green}");
+
+		// A group's header and the objectives under it, in one colour per state the group stands for
+		static constexpr const TCHAR* RunningHeader = TEXT("{lightblue}");
+		static constexpr const TCHAR* Running = TEXT("{white}");
+		static constexpr const TCHAR* PausedHeader = TEXT("{orange}");
+		static constexpr const TCHAR* Paused = TEXT("{orange}");
+		static constexpr const TCHAR* QueuedHeader = TEXT("{red}");
+		static constexpr const TCHAR* Queued = TEXT("{red}");
+	}
+}
+
+bool FObjectiveContainer::ShouldGameplayDebug() const
+{
+	return GetNestingLevel() < UObjectiveOrientedAIUserSettings::Get().GetGameplayDebuggerNestingDepth();
 }
 
 FDebugInfo::FDebugInfo(const FObjectiveContainer& InObjectiveContainer)
 {
 	bQueued = InObjectiveContainer.IsQueued();
+
+	// Past the depth asked for, the objective owning this container is still drawn - it is only what the
+	// container holds which is left out, and counted so that a tree cut short here does not read like an
+	// objective which simply has nothing under it
+	if (!InObjectiveContainer.ShouldGameplayDebug())
+	{
+		TruncatedCount = InObjectiveContainer.GetCurrentObjectives().Num() + InObjectiveContainer.GetQueuedObjectives().Num();
+		return;
+	}
 
 	CurrentObjectives.Reserve(InObjectiveContainer.GetCurrentObjectives().Num());
 	for (const UAIObjective* Objective : InObjectiveContainer.GetCurrentObjectives())
@@ -66,20 +111,62 @@ FDebugInfo::FDebugInfo(const FObjectiveContainer& InObjectiveContainer)
 	QueuedObjectives.Reserve(InObjectiveContainer.GetQueuedObjectives().Num());
 	for (const UAIObjective* Objective : InObjectiveContainer.GetQueuedObjectives())
 	{
-		QueuedObjectives.Add(Objective->GetDebugInfo());
+		FDebugInfo& QueuedInfo = QueuedObjectives.Add_GetRef(Objective->GetDebugInfo());
+
+		// Which objective is holding this one back is the one thing the tree cannot show by shape, and the
+		// first thing asked on finding something waiting. Only the running objectives are asked: a queued
+		// objective can also be held back by a higher priority one which is waiting itself, but that only
+		// happens while the whole container is paused, which the group header already says
+		for (const UAIObjective* RunningObjective : InObjectiveContainer.GetCurrentObjectives())
+		{
+			if (RunningObjective->ShouldQueueObjective(Objective))
+			{
+				QueuedInfo.HeldBackBy = Sanitize(RunningObjective->GetDebugName());
+				break;
+			}
+		}
 	}
 
 	// The head of the queue is whatever runs next
 	if (!QueuedObjectives.IsEmpty())
 	{
-		QueuedObjectives[0].OwnerName += TEXT(" [Next]");
+		QueuedObjectives[0].bIsNext = true;
 	}
 }
 
 FDebugInfo& FDebugInfo::SetOwnerName(FString InName)
 {
-	OwnerName = MoveTemp(InName);
+	OwnerName = Sanitize(MoveTemp(InName));
 	return *this;
+}
+
+FDebugInfo& FDebugInfo::AddDetail(FString InLabel, FString InValue)
+{
+	Details.Emplace(Sanitize(MoveTemp(InLabel)), Sanitize(MoveTemp(InValue)));
+	return *this;
+}
+
+FDebugInfo& FDebugInfo::SetDefinitionName(FString InName)
+{
+	DefinitionName = Sanitize(MoveTemp(InName));
+	return *this;
+}
+
+FDebugInfo& FDebugInfo::SetTags(FString InTags)
+{
+	Tags = Sanitize(MoveTemp(InTags));
+	return *this;
+}
+
+FDebugInfo& FDebugInfo::SetDescription(FString InDescription)
+{
+	Description = Sanitize(MoveTemp(InDescription));
+	return *this;
+}
+
+bool FDebugInfo::IsEmpty() const
+{
+	return OwnerName.IsEmpty() && Details.IsEmpty() && CurrentObjectives.IsEmpty() && QueuedObjectives.IsEmpty();
 }
 
 void FDebugInfo::Clear()
@@ -90,30 +177,109 @@ void FDebugInfo::Clear()
 FString FDebugInfo::ToString() const
 {
 	FString Result;
-	AppendTo(Result, 0);
+	AppendTo(Result, 0, ObjectiveDebug::Color::Owner, TEXT(""));
+
+	// A component holding nothing would otherwise print its own name and stop, which reads like the
+	// snapshot failed rather than like there being nothing to show. Nothing collected is not nothing held,
+	// so a depth of zero out of a hand edited ini is not allowed to claim it is
+	if (CurrentObjectives.IsEmpty() && QueuedObjectives.IsEmpty() && TruncatedCount == 0)
+	{
+		AppendLine(Result, 1, FString::Printf(TEXT("%sno objectives"), ObjectiveDebug::Color::Label));
+	}
+
 	return Result;
 }
 
-void FDebugInfo::AppendTo(FString& OutString, int32 IndentLevel) const
+void FDebugInfo::AppendTo(FString& OutString, int32 IndentLevel, const TCHAR* StateColor, const TCHAR* Prefix) const
 {
-	AppendLine(OutString, IndentLevel, OwnerName);
-	AppendGroup(OutString, IndentLevel + 1, bQueued ? TEXT("Current: [Pending]") : TEXT("Current:"), CurrentObjectives);
-	AppendGroup(OutString, IndentLevel + 1, TEXT("Pending:"), QueuedObjectives);
+	AppendLine(OutString, IndentLevel, GetHeadline(StateColor, Prefix));
+
+	for (const TPair<FString, FString>& Detail : Details)
+	{
+		AppendLine(OutString, IndentLevel + 1, FString::Printf(TEXT("%s%s %s%s"),
+			ObjectiveDebug::Color::Label, *Detail.Key, ObjectiveDebug::Color::Value, *Detail.Value));
+	}
+
+	// A paused container keeps its running set without letting any of it run, so neither the header nor the
+	// objectives under it may be drawn as though they were going
+	AppendGroup(OutString, IndentLevel + 1,
+		bQueued ? ObjectiveDebug::Color::PausedHeader : ObjectiveDebug::Color::RunningHeader,
+		bQueued ? TEXT("Running [paused]") : TEXT("Running"),
+		bQueued ? ObjectiveDebug::Color::Paused : ObjectiveDebug::Color::Running,
+		CurrentObjectives);
+
+	AppendGroup(OutString, IndentLevel + 1, ObjectiveDebug::Color::QueuedHeader, TEXT("Queued"),
+		ObjectiveDebug::Color::Queued, QueuedObjectives);
 }
 
-void FDebugInfo::AppendGroup(FString& OutString, int32 IndentLevel, FStringView Header, const TArray<FDebugInfo>& Objectives)
+FString FDebugInfo::GetHeadline(const TCHAR* StateColor, const TCHAR* Prefix) const
+{
+	FString Headline = FString::Printf(TEXT("%s%s%s"), StateColor, Prefix, *OwnerName);
+
+	if (!DefinitionName.IsEmpty())
+	{
+		Headline += FString::Printf(TEXT(" %s[%s]"), ObjectiveDebug::Color::Definition, *DefinitionName);
+	}
+
+	if (!Tags.IsEmpty())
+	{
+		Headline += FString::Printf(TEXT(" %s<%s>"), ObjectiveDebug::Color::Tags, *Tags);
+	}
+
+	// The one part of the line the objective wrote itself, so it says which montage is playing or where a
+	// sequence has got to. Treated as a value and not as prose for exactly that reason
+	if (!Description.IsEmpty())
+	{
+		Headline += FString::Printf(TEXT(" %s- %s"), ObjectiveDebug::Color::Value, *Description);
+	}
+
+	if (!HeldBackBy.IsEmpty())
+	{
+		Headline += FString::Printf(TEXT(" %s(held by %s%s%s)"), ObjectiveDebug::Color::Label,
+			ObjectiveDebug::Color::Value, *HeldBackBy, ObjectiveDebug::Color::Label);
+	}
+
+	if (TruncatedCount > 0)
+	{
+		Headline += FString::Printf(TEXT(" %s(+%d below depth)"), ObjectiveDebug::Color::Label, TruncatedCount);
+	}
+
+	if (bIsNext)
+	{
+		Headline += FString::Printf(TEXT(" %s<< next"), ObjectiveDebug::Color::Next);
+	}
+
+	return Headline;
+}
+
+void FDebugInfo::AppendGroup(FString& OutString, int32 IndentLevel, const TCHAR* HeaderColor, const TCHAR* Header,
+	const TCHAR* StateColor, const TArray<FDebugInfo>& Objectives)
 {
 	if (Objectives.IsEmpty())
 	{
 		return;
 	}
 
-	AppendLine(OutString, IndentLevel, Header);
+	AppendLine(OutString, IndentLevel, FString::Printf(TEXT("%s%s (%d)"), HeaderColor, Header, Objectives.Num()));
 
-	for (const FDebugInfo& Objective : Objectives)
+	for (int32 Index = 0; Index < Objectives.Num(); ++Index)
 	{
-		Objective.AppendTo(OutString, IndentLevel + 1);
+		// Numbered because the order is the priority order: the last entry is the one which gives way
+		Objectives[Index].AppendTo(OutString, IndentLevel + 1, StateColor, *FString::Printf(TEXT("%d. "), Index + 1));
 	}
+}
+
+FString FDebugInfo::Sanitize(FString InString)
+{
+	// A brace starts a colour tag, and everything up to the closing one is dropped when what is between
+	// them is not a colour, so a name carrying one would quietly lose part of itself. A newline would
+	// break the line the name sits on in half, taking its indentation with it
+	InString.ReplaceCharInline(TEXT('{'), TEXT('('));
+	InString.ReplaceCharInline(TEXT('}'), TEXT(')'));
+	InString.ReplaceCharInline(TEXT('\n'), TEXT(' '));
+	InString.ReplaceCharInline(TEXT('\r'), TEXT(' '));
+
+	return InString;
 }
 
 void FDebugInfo::AppendLine(FString& OutString, int32 IndentLevel, FStringView Line)
@@ -215,7 +381,16 @@ UAIObjective* FObjectiveContainer::TryCreateAIObjective(UObjectiveComponent* Obj
 	{
 		return nullptr;
 	}
-	if (FindBlockingObjective(Class.GetDefaultObject()))
+	const UAIObjective* ClassDefaults = Class.GetDefaultObject();
+
+	// There is no point handing back an objective which this component could never run, and asking before
+	// it exists is the whole reason the question is put to the class defaults
+	if (!ClassDefaults->IsCompatibleWith(ObjectiveComponent))
+	{
+		return nullptr;
+	}
+
+	if (FindBlockingObjective(ClassDefaults))
 	{
 		return nullptr;
 	}
@@ -235,6 +410,14 @@ bool FObjectiveContainer::CanAddObjective(const UObjectiveComponent* ObjectiveCo
 	}
 
 	if (!ObjectiveComponent->GetPawn())
+	{
+		return false;
+	}
+
+	// Asked here rather than later because here is the last moment at which nothing has been spent yet: the
+	// objective being asked is still the class default object or the caller's template, and refusing it
+	// costs neither a copy nor an OnInitialized
+	if (!AIObjective->IsCompatibleWith(ObjectiveComponent))
 	{
 		return false;
 	}

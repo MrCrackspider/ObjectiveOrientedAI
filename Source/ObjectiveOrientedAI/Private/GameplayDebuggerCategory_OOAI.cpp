@@ -22,7 +22,16 @@ void FGameplayDebuggerCategory_OOAI::CollectData(APlayerController* OwnerPC, AAc
 
 void FGameplayDebuggerCategory_OOAI::DrawData(APlayerController* OwnerPC, FGameplayDebuggerCanvasContext& CanvasContext)
 {
-	CanvasContext.Print(DebugInfo.ToString());
+	// Saying so rather than drawing nothing at all, which reads as the category being broken
+	if (DebugInfo.IsEmpty())
+	{
+		CanvasContext.Print(TEXT("{white}Selected actor has no objective component"));
+	}
+	else
+	{
+		CanvasContext.Print(DebugInfo.ToString());
+	}
+
 	FGameplayDebuggerCategory::DrawData(OwnerPC, CanvasContext);
 }
 

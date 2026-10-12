@@ -20,7 +20,7 @@ class OBJECTIVEORIENTEDAI_API UAIO_MoveTo : public UAIObjective
 {
 	GENERATED_BODY()
 
-	virtual bool CanActivate_Implementation(const UObjectiveComponent* ObjectiveComponent) const override;
+	virtual bool IsCompatibleWith_Implementation(const UObjectiveComponent* ObjectiveComponent) const override;
 	virtual void OnStarted_Implementation(bool bWasQueued) override;
 	virtual void OnStopped_Implementation(const FStopReasonType& StopReason) override;
 	

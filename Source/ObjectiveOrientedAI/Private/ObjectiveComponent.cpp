@@ -4,6 +4,7 @@
 #include "GameplayTasksComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
 #include "Navigation/PathFollowingComponent.h"
 
 namespace ObjectiveComponentUtils
@@ -172,6 +173,12 @@ void UObjectiveComponent::ClearObjectives()
 #if WITH_GAMEPLAY_DEBUGGER_MENU
 FDebugInfo UObjectiveComponent::GetDebugInfo() const
 {
-	return FDebugInfo(ObjectiveContainer).SetOwnerName(GetName());
+	// Both named at the root rather than left to be inferred: the component runs on any kind of controller
+	// now, and an objective which turns out to be inadmissible is usually inadmissible because of one of
+	// these two. The pawn is asked of the component, so it reads the outgoing one during a swap
+	return FDebugInfo(ObjectiveContainer)
+		.SetOwnerName(GetName())
+		.AddDetail(TEXT("Controller"), GetNameSafe(OwningController))
+		.AddDetail(TEXT("Pawn"), GetNameSafe(GetPawn()));
 }
 #endif

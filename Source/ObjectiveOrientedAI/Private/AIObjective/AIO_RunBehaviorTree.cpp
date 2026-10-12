@@ -20,9 +20,19 @@ FText UAIO_RunBehaviorTree::GetDebugDescription_Implementation() const
 }
 #endif
 
+bool UAIO_RunBehaviorTree::IsCompatibleWith_Implementation(const UObjectiveComponent* ObjectiveComponent) const
+{
+	// A behavior tree is run by an AI controller and by nothing else, which is a property of the component
+	// rather than of this objective: no amount of setting it up makes it runnable on a player controller
+	return ObjectiveComponent && ObjectiveComponent->GetAIOwner();
+}
+
 bool UAIO_RunBehaviorTree::CanActivate_Implementation(const UObjectiveComponent* ObjectiveComponent) const
 {
-	return IsValid(BehaviorTree) && ObjectiveComponent && ObjectiveComponent->GetAIOwner();
+	// Stays here rather than moving up with the controller check: the tree can still be given to this
+	// objective after it is created, by ExposeOnSpawn or by MakeInstance, so a template without one yet
+	// says nothing about whether the objective which runs will have one
+	return IsValid(BehaviorTree);
 }
 
 void UAIO_RunBehaviorTree::OnStarted_Implementation(bool bWasQueued)

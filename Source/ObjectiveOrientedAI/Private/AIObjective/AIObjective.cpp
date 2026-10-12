@@ -149,19 +149,47 @@ void UAIObjective::Invalidate(bool bSuccess)
 }
 
 #if WITH_GAMEPLAY_DEBUGGER_MENU
+FString UAIObjective::GetDebugName() const
+{
+	const UClass* ObjectiveClass = GetClass();
+
+	// A native objective has an authored display name worth using. A Blueprint one has only its asset name,
+	// which the same call would pull apart into separate words, so it is read as it was typed with the
+	// generated class suffix taken off
+	if (ObjectiveClass->IsNative())
+	{
+		return ObjectiveClass->GetDisplayNameText().ToString();
+	}
+
+	FString DisplayName = ObjectiveClass->GetName();
+	DisplayName.RemoveFromEnd(TEXT("_C"));
+
+	return DisplayName;
+}
+
 FDebugInfo UAIObjective::GetDebugInfo() const
 {
-	FString DisplayName = GetName();
+	FDebugInfo DebugInfo = FDebugInfo(ObjectiveContainer).SetOwnerName(GetDebugName());
+
+	// Named rather than merely present: which definition an objective plays by decides every rule it
+	// imposes and every rule imposed on it, and two objectives of one class can carry different ones
+	if (const UAIObjectiveDefinition* ObjectiveDefinition = GetDefinition())
+	{
+		DebugInfo.SetDefinitionName(ObjectiveDefinition->GetName());
+	}
+
+	// Only the instance tags: the definition's own are implied by naming it, and printing both would
+	// repeat the whole definition on every objective sharing it
+	if (!ObjectiveTags.IsEmpty())
+	{
+		DebugInfo.SetTags(ObjectiveTags.ToStringSimple());
+	}
 
 #if WITH_EDITOR
-	const FText Description = GetDebugDescription();
-	if (!Description.IsEmpty())
-	{
-		DisplayName += TEXT(" - ") + Description.ToString();
-	}
+	DebugInfo.SetDescription(GetDebugDescription().ToString());
 #endif
 
-	return FDebugInfo(ObjectiveContainer).SetOwnerName(MoveTemp(DisplayName));
+	return DebugInfo;
 }
 #endif
 

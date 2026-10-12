@@ -166,6 +166,13 @@ public:
 #endif
 
 #if WITH_GAMEPLAY_DEBUGGER_MENU
+	/**
+	 * What this objective is called in the debugger: its class, as a reader would name it rather than as
+	 * the object is named. Objectives of one class are told apart by their place in the container, which
+	 * is printed beside the name
+	 */
+	FString GetDebugName() const;
+
 	FDebugInfo GetDebugInfo() const;
 #endif
 
@@ -184,6 +191,27 @@ protected:
 	void OnInitialized();
 
 	virtual void OnInitialized_Implementation() {}
+
+	/**
+	 * Whether an objective of this class could ever run on this component at all. Asked before anything is
+	 * built: on the class default object when the objective is added from a class, on the template when it
+	 * is added from an instance, in both cases before any copy is made and before Initialize, so refusing
+	 * here costs nothing where refusing from CanActivate costs a copy and an OnInitialized
+	 *
+	 * Answer on what the component can offer - the kind of controller it is on, what the pawn is, which
+	 * components are there to drive. Do not answer on this objective's own data: the object being asked is
+	 * a default or a template, and the objective which actually runs may still be given its values by a
+	 * subclass default, by ExposeOnSpawn, by the caller's initializer or by OnInitialized. An objective
+	 * which wants to read its own state here guards on !HasAnyFlags(RF_ClassDefaultObject), since only a
+	 * template carries values worth reading
+	 *
+	 * Contract: return false only when this class can never run on this component. Everything which can
+	 * change over the objective's life belongs in CanActivate
+	 */
+	UFUNCTION(BlueprintNativeEvent, Category = "AI Objective")
+	bool IsCompatibleWith(const UObjectiveComponent* ObjectiveComponent) const;
+
+	virtual bool IsCompatibleWith_Implementation(const UObjectiveComponent* ObjectiveComponent) const { return true; }
 
 	/** Triggered each time objective is trying to activate
 	 * Activation failure leads to objective being invalidated with failure.
