@@ -76,11 +76,11 @@ void UAIObjectiveComposite::OnStarted_Implementation(bool bWasQueued)
 		FObjectiveStoppedDelegate Callback;
 		if (IsLeadObjective(EntryIndex))
 		{
-			Callback.BindDynamic(this, &UAIObjectiveComposite::OnLeadEntryStopped);
+			Callback.BindUObject(this, &UAIObjectiveComposite::OnLeadEntryStopped);
 		}
 		else
 		{
-			Callback.BindDynamic(this, &UAIObjectiveComposite::OnEntryStopped);
+			Callback.BindUObject(this, &UAIObjectiveComposite::OnEntryStopped);
 		}
 
 		AddSubObjective(Entry, true, Callback);

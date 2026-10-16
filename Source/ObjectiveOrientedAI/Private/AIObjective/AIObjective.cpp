@@ -358,7 +358,7 @@ void UAIObjective::Enqueue()
 
 	OnStopped(EAIObjectiveStopReason::Queued);
 
-	OnObjectiveStoppedEvent.Broadcast(this, EAIObjectiveStopReason::Queued);
+	OnObjectiveStopped.Broadcast(this, EAIObjectiveStopReason::Queued);
 }
 
 void UAIObjective::Destroy(const FStopReasonType& StopReason)
@@ -375,7 +375,7 @@ void UAIObjective::Destroy(const FStopReasonType& StopReason)
 		ObjectiveContainer.ClearObjectives();
 		OnStopped(StopReason);
 		OnInvalidated(StopReason.IsSucceeded());
-		OnObjectiveStoppedEvent.Broadcast(this, StopReason);
+		OnObjectiveStopped.Broadcast(this, StopReason);
 		UE_LOG(ObjectiveOrientedAI, Display, TEXT("%s was invalidated."), *GetName());
 	}
 

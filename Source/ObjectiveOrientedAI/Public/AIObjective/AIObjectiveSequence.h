@@ -86,8 +86,9 @@ protected:
 	bool IsEndPoint() const;
 	bool IsLoop() const;
 
-	UFUNCTION()
-	void OnObjectiveStopped(UAIObjective* AIObjective, const FStopReasonType& StopReason);
+	// Named for the entry it hears about rather than for the event, which the base class now carries
+	// under the name this had
+	void OnEntryStopped(UAIObjective* AIObjective, const FStopReasonType& StopReason);
 
 private:
 

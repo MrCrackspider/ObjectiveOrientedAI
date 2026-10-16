@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "AIObjective/AIObjective.h"
+#include "Async/AsyncAction_AddObjectiveAndWait.h"
 #include "Engine/CancellableAsyncAction.h"
 #include "ObjectiveAsync_WaitObjectiveInvalidated.generated.h"
 
@@ -29,7 +30,6 @@ protected:
 	virtual void Cancel() override;
 	virtual bool IsActive() const override;
 
-	UFUNCTION()
 	void ReceiveObjectiveStopped(UAIObjective* UAIObjective, const FStopReasonType& StopReason);
 
 	TWeakObjectPtr<UAIObjective> AIObjective;

@@ -91,7 +91,6 @@ protected:
 	virtual bool CanActivate_Implementation(const UObjectiveComponent* ObjectiveComponent) const override;
 	virtual void OnStarted_Implementation(bool bWasQueued) override;
 
-	UFUNCTION()
 	void OnMontageObjectiveStopped(UAIObjective* AIObjective, const FStopReasonType& StopReason);
 
 	/**

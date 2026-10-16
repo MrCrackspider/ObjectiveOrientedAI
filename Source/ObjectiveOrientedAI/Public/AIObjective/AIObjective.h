@@ -118,9 +118,14 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category  = "AI Objective")
 	UAIObjective* TryCreateSubObjective(TSubclassOf<UAIObjective> Class) const;
-	
+
+	/**
+	 * The same, typed: T is read off the class handed in, so a class property gives a sub objective which
+	 * is already the type the caller means to use it as. Null when this objective cannot take sub
+	 * objectives right now, and null in the same way when Class does not derive from T
+	 */
 	template<typename T>
-	T* CreateSubObjective();
+	T* TryCreateSubObjective(TSubclassOf<T> Class) const;
 
 	UFUNCTION(BlueprintCallable, Category = "AI Objective")
 	void ClearSubObjectives();
@@ -149,10 +154,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AI Objective")
 	void Invalidate(bool bSuccess = true);
 	
-	/** Broadcast whenever this objective stops for any reason.
+	/**
+	 * Broadcast whenever this objective stops for any reason.
 	 */
-	UPROPERTY(BlueprintAssignable, Category = "AI Objective")
-	FOnObjectiveStoppedSignature OnObjectiveStoppedEvent;
+	FOnObjectiveStopped OnObjectiveStopped;
 
 #if WITH_EDITOR
 	/** 
@@ -308,7 +313,12 @@ private:
 };
 
 template <typename T>
-T* UAIObjective::CreateSubObjective()
+T* UAIObjective::TryCreateSubObjective(TSubclassOf<T> Class) const
 {
-	return (T*)CreateSubObjective(T::StaticClass());
+	static_assert(std::is_base_of_v<UAIObjective, T>, "TryCreateSubObjective only takes objective classes");
+
+	// Handed on as a plain UClass*, which keeps this overload from being a candidate for its own call.
+	// Get() has already answered null for a class which does not derive from T, so the cast cannot fail -
+	// but null it may well be, since nothing which could not run here is created in the first place
+	return CastChecked<T>(TryCreateSubObjective(Class.Get()), ECastCheckedType::NullAllowed);
 }

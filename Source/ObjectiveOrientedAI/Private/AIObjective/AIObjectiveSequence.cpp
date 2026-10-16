@@ -144,7 +144,7 @@ bool UAIObjectiveSequence::RunEntries()
 
 		// Subscribing through AddSubObjective means the copy reports back even if it stops while activating
 		const FObjectiveActivationResult Result = AddSubObjective(Entry, true,
-			MakeStoppedDelegate(this, &UAIObjectiveSequence::OnObjectiveStopped));
+			FObjectiveStoppedDelegate::CreateUObject(this, &UAIObjectiveSequence::OnEntryStopped));
 
 		if (UAIObjective* StartedEntry = Result.GetObjective())
 		{
@@ -252,7 +252,7 @@ bool UAIObjectiveSequence::IsLoop() const
 	return ExecutionMode == EObjectiveSequenceMode::Loop;
 }
 
-void UAIObjectiveSequence::OnObjectiveStopped(UAIObjective* AIObjective, const FStopReasonType& StopReason)
+void UAIObjectiveSequence::OnEntryStopped(UAIObjective* AIObjective, const FStopReasonType& StopReason)
 {
 	// Cancelled entries were stopped from the outside, most often by this sequence restarting or
 	// tearing down, and must not be mistaken for an entry which ran to completion

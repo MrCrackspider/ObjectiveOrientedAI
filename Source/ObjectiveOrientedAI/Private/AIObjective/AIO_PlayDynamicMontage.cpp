@@ -130,7 +130,7 @@ void UAIO_PlayDynamicMontage::OnStarted_Implementation(bool bWasQueued)
 
 	// Subscribing through AddSubObjective means the montage reports back even if it stops while activating
 	const FObjectiveActivationResult Result = AddSubObjective(NewMontageObjective, false,
-		MakeStoppedDelegate(this, &UAIO_PlayDynamicMontage::OnMontageObjectiveStopped));
+		FObjectiveStoppedDelegate::CreateUObject(this, &UAIO_PlayDynamicMontage::OnMontageObjectiveStopped));
 
 	// A montage which did not survive activation has already reported back and invalidated this objective,
 	// so only one which never activated at all is left to answer for here

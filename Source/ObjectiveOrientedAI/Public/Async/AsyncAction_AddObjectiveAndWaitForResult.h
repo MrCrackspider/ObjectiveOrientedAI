@@ -34,7 +34,6 @@ public:
 
 protected:
 
-	UFUNCTION()
 	void OnStopped(UAIObjective* AIObjective, const FStopReasonType& StopReason);
 
 private:

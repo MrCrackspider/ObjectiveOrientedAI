@@ -38,10 +38,14 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Objective Component", meta = (DeterminesOutputType = "Class"))
 	UAIObjective* TryCreateAIObjective(TSubclassOf<UAIObjective> Class);
-	
+
 	template <typename T>
 	T* TryCreateAIObjective();
-	
+
+	/** The same for a class only known at runtime, typed off the class handed in rather than cast after */
+	template <typename T>
+	T* TryCreateAIObjective(TSubclassOf<T> Class);
+
 	FObjectiveContainer& GetObjectiveContainerMutable() { return ObjectiveContainer; }
 	const FObjectiveContainer& GetObjectiveContainer() const { return ObjectiveContainer; }
 	
@@ -80,6 +84,15 @@ public:
 
 	template<class T, typename InitializerType = FNullInitializer>
 	FObjectiveActivationResult AddObjective(InitializerType&& Initializer = {}, FObjectiveStoppedDelegate OnStopped = {});
+
+	/**
+	 * Adds an objective of a class only known at runtime, handing the initializer an objective which is
+	 * already typed. T is read off the TSubclassOf, so nothing is cast at the call site
+	 */
+	template<class T, typename InitializerType
+		UE_REQUIRES(std::is_invocable_v<InitializerType, T*>)>
+	FObjectiveActivationResult AddObjective(TSubclassOf<T> AIObjectiveClass, InitializerType&& Initializer,
+		FObjectiveStoppedDelegate OnStopped = {});
 
 #if WITH_GAMEPLAY_DEBUGGER_MENU
 	FDebugInfo GetDebugInfo() const;
@@ -125,11 +138,30 @@ private:
 template <typename T>
 T* UObjectiveComponent::TryCreateAIObjective()
 {
-	return (T*)TryCreateAIObjective(T::StaticClass());
+	// Null allowed rather than a failed cast: nothing is created at all when no objective of this class
+	// could run on this component
+	return CastChecked<T>(TryCreateAIObjective(T::StaticClass()), ECastCheckedType::NullAllowed);
+}
+
+template <typename T>
+T* UObjectiveComponent::TryCreateAIObjective(TSubclassOf<T> Class)
+{
+	static_assert(std::is_base_of_v<UAIObjective, T>, "TryCreateAIObjective only takes objective classes");
+
+	// Handed on as a plain UClass*, which keeps this overload from being a candidate for its own call.
+	// Get() has already answered null for a class which does not derive from T
+	return CastChecked<T>(TryCreateAIObjective(Class.Get()), ECastCheckedType::NullAllowed);
 }
 
 template <class T, typename InitializerType>
 FObjectiveActivationResult UObjectiveComponent::AddObjective(InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
 {
 	return ObjectiveContainer.AddObjective<T>(this, Forward<InitializerType>(Initializer), MoveTemp(OnStopped));
+}
+
+template <class T, typename InitializerType UE_REQUIRES_DEFINITION(std::is_invocable_v<InitializerType, T*>)>
+FObjectiveActivationResult UObjectiveComponent::AddObjective(TSubclassOf<T> AIObjectiveClass, InitializerType&& Initializer,
+	FObjectiveStoppedDelegate OnStopped)
+{
+	return ObjectiveContainer.AddObjective<T>(this, AIObjectiveClass, Forward<InitializerType>(Initializer), MoveTemp(OnStopped));
 }

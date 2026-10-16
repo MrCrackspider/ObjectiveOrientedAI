@@ -1,6 +1,10 @@
 #pragma once
 
 #include "EngineDefines.h"
+#include "Templates/Requires.h"
+#include "Templates/SubclassOf.h"
+
+#include <type_traits>
 
 #include "ObjectiveContainer.generated.h"
 
@@ -41,41 +45,14 @@ struct FStopReasonType
 	OBJECTIVEORIENTEDAI_API bool IsRestarting() const;
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnObjectiveStoppedSignature, UAIObjective*, AIObjective, const FStopReasonType&, StopReason);
-
-using FObjectiveStoppedDelegate = FOnObjectiveStoppedSignature::FDelegate;
-
-namespace ObjectiveDelegates
-{
-	/**
-	 * Builds a stopped callback out of an object and one of its UFUNCTIONs.
-	 *
-	 * Not called directly: MakeStoppedDelegate below is what supplies the reflected name, exactly as
-	 * BindDynamic does for a delegate which already exists
-	 */
-	template <typename UserClass>
-	FObjectiveStoppedDelegate MakeStopped(UserClass* Object,
-		typename FObjectiveStoppedDelegate::TMethodPtrResolver<UserClass>::FMethodPtr Method, FName FunctionName)
-	{
-		FObjectiveStoppedDelegate Delegate;
-		Delegate.__Internal_BindDynamic(Object, Method, FunctionName);
-
-		return Delegate;
-	}
-}
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnObjectiveStopped, UAIObjective* /*AIObjective*/, const FStopReasonType& /*StopReason*/);
 
 /**
- * A stopped callback, bound and ready to be handed to AddObjective in the same expression.
- *
- * A dynamic delegate can only be bound through a macro, since the function's reflected name comes from
- * stringifying it at the call site - which is also why one cannot simply be constructed inline. This is
- * that macro the other way round: it yields the delegate rather than binding one already declared
- *
- * @param UserObject Object holding the function
- * @param FuncName Address of a member UFUNCTION, in the form &UClassName::FunctionName
+ * A stopped callback, as handed to AddObjective. Built with the delegate's own Create functions -
+ * CreateUObject for a member function, CreateLambda or CreateWeakLambda where there is nothing to name -
+ * and the function it points at needs no UFUNCTION of its own
  */
-#define MakeStoppedDelegate(UserObject, FuncName) \
-	ObjectiveDelegates::MakeStopped(UserObject, FuncName, STATIC_FUNCTION_FNAME(#FuncName))
+using FObjectiveStoppedDelegate = FOnObjectiveStopped::FDelegate;
 
 #if WITH_GAMEPLAY_DEBUGGER_MENU
 
@@ -259,7 +236,19 @@ struct FObjectiveContainer
 
 	template<class T, typename InitializerFunc = FNullInitializer>
 	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerFunc&& Initializer = {}, FObjectiveStoppedDelegate OnStopped = {});
-	
+
+	/**
+	 * The same, for a class which is only known at runtime: the initializer is handed the new objective
+	 * already typed, with T read off the TSubclassOf rather than written out. A class property is enough
+	 * to get a typed initializer, and one written against the wrong type is a compile error instead of a
+	 * cast at the call site which nothing checks until it runs
+	 * @param Initializer Runs on the new objective after it is initialized and before it activates
+	 */
+	template<class T, typename InitializerType
+		UE_REQUIRES(std::is_invocable_v<InitializerType, T*>)>
+	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, TSubclassOf<T> AIObjectiveClass,
+		InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped = {});
+
 	void ClearObjectives();
 	void ClearObjectives(const FGameplayTagQuery& Query);
 	void ClearObjectives(const FGameplayTagContainer& Tags);
@@ -378,4 +367,22 @@ FObjectiveActivationResult FObjectiveContainer::AddObjective(UObjectiveComponent
 	};
 
 	return AddObjective(ObjectiveComponent, T::StaticClass(), TypedInitializer, MoveTemp(OnStopped));
+}
+
+template <class T, typename InitializerType UE_REQUIRES_DEFINITION(std::is_invocable_v<InitializerType, T*>)>
+FObjectiveActivationResult FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent,
+	TSubclassOf<T> AIObjectiveClass, InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
+{
+	static_assert(std::is_base_of_v<UAIObjective, T>, "AddObjective only takes objective classes");
+
+	auto TypedInitializer = [&Initializer](UAIObjective* InObjective)
+	{
+		// Cannot fail: TSubclassOf<T>::Get() below answers null for a class which does not derive from T,
+		// and a null class is turned away before anything is created
+		Initializer(CastChecked<T>(InObjective));
+	};
+
+	// Handed on as a plain UClass*, which is what keeps this overload from being a candidate for its own
+	// call: TSubclassOf<T> cannot be deduced from a UClass*, so the one below is the untyped overload
+	return AddObjective(ObjectiveComponent, AIObjectiveClass.Get(), TypedInitializer, MoveTemp(OnStopped));
 }

@@ -19,14 +19,14 @@ void UObjectiveAsync_WaitObjectiveInvalidated::Activate()
 		SetReadyToDestroy();
 		return;
 	}
-	AIObjective->OnObjectiveStoppedEvent.AddDynamic(this, &UObjectiveAsync_WaitObjectiveInvalidated::ReceiveObjectiveStopped);
+	AIObjective->OnObjectiveStopped.AddUObject(this, &UObjectiveAsync_WaitObjectiveInvalidated::ReceiveObjectiveStopped);
 }
 
 void UObjectiveAsync_WaitObjectiveInvalidated::Cancel()
 {
 	if (AIObjective.IsValid())
 	{
-		AIObjective->OnObjectiveStoppedEvent.RemoveDynamic(this, &UObjectiveAsync_WaitObjectiveInvalidated::ReceiveObjectiveStopped);
+		AIObjective->OnObjectiveStopped.RemoveAll(this);
 	}
 	AIObjective.Reset();
 	Super::Cancel();

@@ -441,7 +441,7 @@ void FObjectiveContainer::BindStoppedCallback(UAIObjective* InObjective, const F
 {
 	if (OnStopped.IsBound())
 	{
-		InObjective->OnObjectiveStoppedEvent.Add(OnStopped);
+		InObjective->OnObjectiveStopped.Add(OnStopped);
 	}
 }
 

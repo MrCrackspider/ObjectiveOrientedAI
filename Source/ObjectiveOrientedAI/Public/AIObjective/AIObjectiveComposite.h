@@ -40,11 +40,9 @@ protected:
 	// Invalidates this objective once nothing of it is left running
 	void CheckCompletion();
 
-	UFUNCTION()
 	void OnEntryStopped(UAIObjective* AIObjective, const FStopReasonType& StopReason);
 
 	// Bound to lead entries in place of OnEntryStopped, so recognising one costs no bookkeeping
-	UFUNCTION()
 	void OnLeadEntryStopped(UAIObjective* AIObjective, const FStopReasonType& StopReason);
 
 private:

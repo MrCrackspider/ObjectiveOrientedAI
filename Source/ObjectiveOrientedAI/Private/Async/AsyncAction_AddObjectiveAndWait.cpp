@@ -33,7 +33,7 @@ void UAsyncAction_AddObjectiveAndWait::Activate()
 		return;
 	}
 	
-	Objective->OnObjectiveStoppedEvent.AddDynamic(this, &UAsyncAction_AddObjectiveAndWait::OnStopped);
+	Objective->OnObjectiveStopped.AddUObject(this, &UAsyncAction_AddObjectiveAndWait::OnStopped);
 
 	// Only activation failure is reported here. An objective which activated and then invalidated itself
 	// already reported its result through OnStopped
@@ -62,7 +62,7 @@ void UAsyncAction_AddObjectiveAndWait::Cancel()
 {
 	if (Objective.IsValid())
 	{
-		Objective->OnObjectiveStoppedEvent.RemoveDynamic(this, &UAsyncAction_AddObjectiveAndWait::OnStopped);
+		Objective->OnObjectiveStopped.RemoveAll(this);
 		if (bInvalidateOnCancel)
 		{
 			Objective->Invalidate(false);

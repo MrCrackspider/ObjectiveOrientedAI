@@ -103,6 +103,12 @@ recheck, finally `OnStarted(bWasQueued)`.
 **Invariant worth remembering:** `OnStopped` / `OnInvalidated` never run for an objective that was
 initialized but never started. See trap 2.
 
+"Broadcast" above means `OnObjectiveStopped` (`FOnObjectiveStopped`), a native multicast delegate, of
+which `FObjectiveStoppedDelegate` — the `OnStopped` argument of every add path — is the single-cast form.
+There is no Blueprint assignable stopped event any more: the dynamic `OnObjectiveStoppedEvent` was
+removed, so a Blueprint which needs to hear an objective stop goes through `OnStopped`/`OnInvalidated` or
+one of the latent nodes. Nothing needs a `UFUNCTION` to listen.
+
 ## The four add paths
 
 All go through `FObjectiveContainer`. `UObjectiveComponent::AddObjective` and
@@ -114,6 +120,13 @@ All go through `FObjectiveContainer`. `UObjectiveComponent::AddObjective` and
    `AddNewObjective`.
 2. **`AddObjective(Component, TSubclassOf, Initializer)`** — `:305`
    `CanAddObjective(component, Class.GetDefaultObject())` → `NewObject` → `AddNewObjective`.
+   The initializer takes a bare `UAIObjective*`. Two header-only templates wrap it so it does not
+   have to: `AddObjective<T>(Component, Initializer)` for a class known at compile time, and
+   `AddObjective(Component, TSubclassOf<T>, Initializer)` which deduces `T` from the class handed in,
+   so a class property gives a typed initializer with no cast at the call site. Both are constrained
+   on the initializer being invocable with `T*`, which is what keeps the untyped overloads reachable
+   when the third argument is a stopped delegate instead. They hand the class on as a plain `UClass*`
+   so the typed overload is not a candidate for its own inner call.
 3. **`AddNewObjective`** — `:320` — `Initialize(+Initializer)` → validity check → `BindStoppedCallback`
    → **`CanActivate`** → `ActivateObjective`.
 4. **`AddInitializedObjective`** — `:355` — re-add. `CanActivate` first, then: queued → no-op;
@@ -363,6 +376,9 @@ Still to move, project-side (`Source/TheEmperorsOwnRuntime`) — each needs the 
    never see each other's rules.
 5. `AIO_StartStateTree.cpp` (project-side, `Source/TheEmperorsOwnRuntime`) is missing
    `#include "Engine/World.h"`; shows up as a false positive under `-SingleFile`.
+6. `FOnObjectiveInvalidated` is declared in `AsyncAction_AddObjectiveAndWait.h` but used by
+   `ObjectiveAsync_WaitObjectiveInvalidated.h` too, which now includes that header for the one type.
+   It belongs in a header of its own.
 
 **Content / Blueprint debt (needs an editor pass, never done)**
 
@@ -371,6 +387,9 @@ Still to move, project-side (`Source/TheEmperorsOwnRuntime`) — each needs the 
   silently and needs a `UAIObjectiveDefinition` asset created and assigned.
 - `GetOwningController()` now returns `AController*`; BPs that dragged that pin into an AI-controller
   function need `GetOwningAIController()`.
+- The `OnObjectiveStoppedEvent` dynamic delegate was removed outright. Any Blueprint which bound that
+  event lost the binding silently — it cannot be redirected — and needs reworking onto `OnStopped` or
+  `OnInvalidated`. `BP_StartScriptDialog` is the one known to look at.
 - Five BPs reference a removed `OptionalAnimInstance`: `BP_AIO_AR_Investigate`, `BP_AIO_HitReaction`,
   `BP_AIO_PreBattleAlert`, `BP_AlertReactionMontage`, `BP_AIO_PlayAnimationWithBlend`.
 - Verify the `bInverse` `PropertyRedirects` entry in `Config/DefaultObjectiveOrientedAI.ini` against an
