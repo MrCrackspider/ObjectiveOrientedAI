@@ -23,7 +23,7 @@ UAIO_RunEQSQuery* UAIO_RunEQSQuery::MakeInstance(UEnvQuery* InQueryTemplate, UOb
 #if WITH_EDITOR
 FText UAIO_RunEQSQuery::GetDebugDescription_Implementation() const
 {
-	return FText::FromString(QueryTemplate ? QueryTemplate->GetName() : TEXT("no query"));
+	return FText::FromString(QueryTemplate ? QueryTemplate->GetName() : TEXT("No query"));
 }
 #endif
 

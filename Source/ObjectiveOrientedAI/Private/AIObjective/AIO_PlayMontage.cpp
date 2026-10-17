@@ -38,7 +38,7 @@ FText UAIO_PlayMontage::GetDebugDescription_Implementation() const
 {
 	if (!AnimMontage)
 	{
-		return FText::FromString(TEXT("no montage"));
+		return FText::FromString(TEXT("No montage"));
 	}
 
 	if (MontageSettings.SectionName.IsNone())

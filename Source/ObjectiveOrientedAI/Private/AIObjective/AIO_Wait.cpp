@@ -36,7 +36,7 @@ FText UAIO_Wait::GetDebugDescription_Implementation() const
 {
 	if (Time <= 0.0)
 	{
-		return FText::FromString(TEXT("no time limit"));
+		return FText::FromString(TEXT("No time limit"));
 	}
 
 	if (!GetWorld() || !TimerHandle.IsValid())

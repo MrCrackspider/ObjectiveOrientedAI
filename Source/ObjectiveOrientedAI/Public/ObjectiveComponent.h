@@ -82,8 +82,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Objective Component", meta = (AdvancedDisplay = bMakeCopy), DisplayName = "Add Objective")
 	UAIObjective* BPAddObjective(UAIObjective* InAIObjective, bool bMakeCopy = false);
 
+	/** Adds an objective instance of a type known here, and hands the result back typed as it */
+	template<typename T
+		UE_REQUIRES(std::is_convertible_v<T*, UAIObjective*>)>
+	TObjectiveActivationResult<T> AddObjective(T* InAIObjective, bool bMakeCopy = false, FObjectiveStoppedDelegate OnStopped = {});
+
+	/** Adds an objective of a class only known at runtime, and hands the result back typed off that class */
+	template<class T>
+	TObjectiveActivationResult<T> AddObjective(TSubclassOf<T> AIObjectiveClass, FObjectiveStoppedDelegate OnStopped = {});
+
 	template<class T, typename InitializerType = FNullInitializer>
-	FObjectiveActivationResult AddObjective(InitializerType&& Initializer = {}, FObjectiveStoppedDelegate OnStopped = {});
+	TObjectiveActivationResult<T> AddObjective(InitializerType&& Initializer = {}, FObjectiveStoppedDelegate OnStopped = {});
 
 	/**
 	 * Adds an objective of a class only known at runtime, handing the initializer an objective which is
@@ -91,7 +100,7 @@ public:
 	 */
 	template<class T, typename InitializerType
 		UE_REQUIRES(std::is_invocable_v<InitializerType, T*>)>
-	FObjectiveActivationResult AddObjective(TSubclassOf<T> AIObjectiveClass, InitializerType&& Initializer,
+	TObjectiveActivationResult<T> AddObjective(TSubclassOf<T> AIObjectiveClass, InitializerType&& Initializer,
 		FObjectiveStoppedDelegate OnStopped = {});
 
 #if WITH_GAMEPLAY_DEBUGGER_MENU
@@ -153,14 +162,26 @@ T* UObjectiveComponent::TryCreateAIObjective(TSubclassOf<T> Class)
 	return CastChecked<T>(TryCreateAIObjective(Class.Get()), ECastCheckedType::NullAllowed);
 }
 
+template <typename T UE_REQUIRES_DEFINITION(std::is_convertible_v<T*, UAIObjective*>)>
+TObjectiveActivationResult<T> UObjectiveComponent::AddObjective(T* InAIObjective, bool bMakeCopy, FObjectiveStoppedDelegate OnStopped)
+{
+	return ObjectiveContainer.AddObjective(this, InAIObjective, bMakeCopy, MoveTemp(OnStopped));
+}
+
+template <class T>
+TObjectiveActivationResult<T> UObjectiveComponent::AddObjective(TSubclassOf<T> AIObjectiveClass, FObjectiveStoppedDelegate OnStopped)
+{
+	return ObjectiveContainer.AddObjective(this, AIObjectiveClass, MoveTemp(OnStopped));
+}
+
 template <class T, typename InitializerType>
-FObjectiveActivationResult UObjectiveComponent::AddObjective(InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
+TObjectiveActivationResult<T> UObjectiveComponent::AddObjective(InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
 {
 	return ObjectiveContainer.AddObjective<T>(this, Forward<InitializerType>(Initializer), MoveTemp(OnStopped));
 }
 
 template <class T, typename InitializerType UE_REQUIRES_DEFINITION(std::is_invocable_v<InitializerType, T*>)>
-FObjectiveActivationResult UObjectiveComponent::AddObjective(TSubclassOf<T> AIObjectiveClass, InitializerType&& Initializer,
+TObjectiveActivationResult<T> UObjectiveComponent::AddObjective(TSubclassOf<T> AIObjectiveClass, InitializerType&& Initializer,
 	FObjectiveStoppedDelegate OnStopped)
 {
 	return ObjectiveContainer.AddObjective<T>(this, AIObjectiveClass, Forward<InitializerType>(Initializer), MoveTemp(OnStopped));

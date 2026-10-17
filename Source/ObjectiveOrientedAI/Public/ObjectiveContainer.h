@@ -138,42 +138,67 @@ struct FNullInitializer
 	void operator()(TObject*) const {}
 };
 
-/** 
- * Result of an attempt to add an objective to a container.
+/**
+ * Result of an attempt to add an objective to a container, typed as the objective the caller added. The
+ * add paths which know that type - a typed instance, a TSubclassOf<T>, an explicit T - return it typed;
+ * the rest return FObjectiveActivationResult. A typed result converts to one typed as any base class, so
+ * either can be held as the untyped one.
+ *
+ * Holds the objective weakly, so a result kept past the add call is still safe to read: once the objective
+ * is invalidated or collected it simply answers null. It holds nothing alive either, so keeping one around
+ * never delays an objective which has been dropped
  */
-USTRUCT()
-struct FObjectiveActivationResult
+template<typename T = UAIObjective>
+struct TObjectiveActivationResult
 {
-	GENERATED_BODY()
+	TObjectiveActivationResult() = default;
 
-	FObjectiveActivationResult() = default;
+	template<typename OtherType
+		UE_REQUIRES(std::is_convertible_v<OtherType*, T*>)>
+	TObjectiveActivationResult(const TObjectiveActivationResult<OtherType>& Other)
+		: Objective(Other.Objective)
+		, bActivated(Other.bActivated)
+	{
+	}
 
-	static FObjectiveActivationResult Activated(UAIObjective* InObjective) { return FObjectiveActivationResult(InObjective, true); }
+	static TObjectiveActivationResult Activated(T* InObjective) { return TObjectiveActivationResult(InObjective, true); }
 
 	/** True if the objective was accepted by the container and was either started or queued */
 	bool WasActivated() const { return bActivated; }
 
 	/** Activated objective, or null if activation failed or the objective invalidated itself while activating */
-	OBJECTIVEORIENTEDAI_API UAIObjective* GetObjective() const;
-
-	/** Typed version of GetObjective() */
-	template<typename T>
-	T* GetObjective() const { return Cast<T>(GetObjective()); }
+	T* GetObjective() const { return Objective.Get(); }
 
 	/** True if the objective was activated but did not survive activation, i.e. it invalidated itself from OnStarted */
-	OBJECTIVEORIENTEDAI_API bool WasInvalidatedDuringActivation() const;
+	bool WasInvalidatedDuringActivation() const { return bActivated && !Objective.IsValid(); }
 
 	explicit operator bool() const { return WasActivated(); }
 
 private:
 
-	FObjectiveActivationResult(UAIObjective* InObjective, bool bInActivated) : Objective(InObjective), bActivated(bInActivated) {}
+	template<typename> friend struct TObjectiveActivationResult;
+	friend struct FObjectiveContainer;
+	friend class UAIObjective;
 
-	UPROPERTY()
-	TObjectPtr<UAIObjective> Objective = nullptr;
+	TObjectiveActivationResult(T* InObjective, bool bInActivated) : Objective(InObjective), bActivated(bInActivated) {}
+
+	/**
+	 * The same result typed as T. Only an add path may claim this, since only it knows the objective is a
+	 * T: it was handed one, or built it from a class deriving from T, and a copy keeps its class. That is
+	 * also what makes the cast below unable to fail. An objective which did not survive activation reads as
+	 * null here, which is what the typed result would answer for it anyway
+	 */
+	static TObjectiveActivationResult CastFrom(const TObjectiveActivationResult<UAIObjective>& Result)
+	{
+		return TObjectiveActivationResult(CastChecked<T>(Result.Objective.Get(), ECastCheckedType::NullAllowed), Result.bActivated);
+	}
+
+	TWeakObjectPtr<T> Objective;
 
 	bool bActivated = false;
 };
+
+using FObjectiveActivationResult = TObjectiveActivationResult<UAIObjective>;
 
 
 USTRUCT()
@@ -222,9 +247,11 @@ struct FObjectiveContainer
 	
 	UAIObjective* TryCreateAIObjective(UObjectiveComponent* ObjectiveComponent, TSubclassOf<UAIObjective> Class) const;
 	
-	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, 
+	// Exported, as is every untyped overload: the typed templates below compile into whichever module calls
+	// them, and it is from there that they call these
+	OBJECTIVEORIENTEDAI_API FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent,
 		UAIObjective* AIObjective, bool bMakeCopy = false, FObjectiveStoppedDelegate OnStopped = {});
-	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, 
+	OBJECTIVEORIENTEDAI_API FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent,
 		TSubclassOf<UAIObjective> AIObjectiveClass, FObjectiveStoppedDelegate OnStopped = {});
 	/**
 	 * Creates an objective of the given class and adds it. Every other way of adding one from a class,
@@ -234,8 +261,23 @@ struct FObjectiveContainer
 	OBJECTIVEORIENTEDAI_API FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent,
 		TSubclassOf<UAIObjective> AIObjectiveClass, TFunctionRef<void(UAIObjective*)> Initializer, FObjectiveStoppedDelegate OnStopped = {});
 
+	/**
+	 * The instance overload above, for an instance whose type is known here: the result hands back the
+	 * objective - or its copy, which keeps its class - as that type. A plain UAIObjective* still goes to the
+	 * untyped overload, as the better match of the two
+	 */
+	template<typename T
+		UE_REQUIRES(std::is_convertible_v<T*, UAIObjective*>)>
+	TObjectiveActivationResult<T> AddObjective(UObjectiveComponent* ObjectiveComponent,
+		T* AIObjective, bool bMakeCopy = false, FObjectiveStoppedDelegate OnStopped = {});
+
+	/** The class overload above, typed off the class handed in, so the result comes back as that type */
+	template<class T>
+	TObjectiveActivationResult<T> AddObjective(UObjectiveComponent* ObjectiveComponent,
+		TSubclassOf<T> AIObjectiveClass, FObjectiveStoppedDelegate OnStopped = {});
+
 	template<class T, typename InitializerFunc = FNullInitializer>
-	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerFunc&& Initializer = {}, FObjectiveStoppedDelegate OnStopped = {});
+	TObjectiveActivationResult<T> AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerFunc&& Initializer = {}, FObjectiveStoppedDelegate OnStopped = {});
 
 	/**
 	 * The same, for a class which is only known at runtime: the initializer is handed the new objective
@@ -246,7 +288,7 @@ struct FObjectiveContainer
 	 */
 	template<class T, typename InitializerType
 		UE_REQUIRES(std::is_invocable_v<InitializerType, T*>)>
-	FObjectiveActivationResult AddObjective(UObjectiveComponent* ObjectiveComponent, TSubclassOf<T> AIObjectiveClass,
+	TObjectiveActivationResult<T> AddObjective(UObjectiveComponent* ObjectiveComponent, TSubclassOf<T> AIObjectiveClass,
 		InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped = {});
 
 	void ClearObjectives();
@@ -356,8 +398,29 @@ private:
 	TArray<TObjectPtr<UAIObjective>> QueuedObjectives;
 };
 
+template <typename T UE_REQUIRES_DEFINITION(std::is_convertible_v<T*, UAIObjective*>)>
+TObjectiveActivationResult<T> FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent,
+	T* AIObjective, bool bMakeCopy, FObjectiveStoppedDelegate OnStopped)
+{
+	// Handed on as a plain UAIObjective*, for which the untyped overload is the exact match and wins
+	return TObjectiveActivationResult<T>::CastFrom(
+		AddObjective(ObjectiveComponent, static_cast<UAIObjective*>(AIObjective), bMakeCopy, MoveTemp(OnStopped)));
+}
+
+template <class T>
+TObjectiveActivationResult<T> FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent,
+	TSubclassOf<T> AIObjectiveClass, FObjectiveStoppedDelegate OnStopped)
+{
+	static_assert(std::is_base_of_v<UAIObjective, T>, "AddObjective only takes objective classes");
+
+	// Handed on as a plain UClass*, which keeps this overload from being a candidate for its own call.
+	// Get() answers null for a class which does not derive from T, and nothing is created from a null class
+	return TObjectiveActivationResult<T>::CastFrom(
+		AddObjective(ObjectiveComponent, TSubclassOf<UAIObjective>(AIObjectiveClass.Get()), MoveTemp(OnStopped)));
+}
+
 template <class T, typename InitializerType>
-FObjectiveActivationResult FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
+TObjectiveActivationResult<T> FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent, InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
 {
 	// All this adds over the class based overload is the caller's typed initializer, wrapped so the one
 	// path from a class to a running objective does not have to be a template itself
@@ -366,11 +429,12 @@ FObjectiveActivationResult FObjectiveContainer::AddObjective(UObjectiveComponent
 		Initializer(CastChecked<T>(InObjective));
 	};
 
-	return AddObjective(ObjectiveComponent, T::StaticClass(), TypedInitializer, MoveTemp(OnStopped));
+	return TObjectiveActivationResult<T>::CastFrom(
+		AddObjective(ObjectiveComponent, T::StaticClass(), TypedInitializer, MoveTemp(OnStopped)));
 }
 
 template <class T, typename InitializerType UE_REQUIRES_DEFINITION(std::is_invocable_v<InitializerType, T*>)>
-FObjectiveActivationResult FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent,
+TObjectiveActivationResult<T> FObjectiveContainer::AddObjective(UObjectiveComponent* ObjectiveComponent,
 	TSubclassOf<T> AIObjectiveClass, InitializerType&& Initializer, FObjectiveStoppedDelegate OnStopped)
 {
 	static_assert(std::is_base_of_v<UAIObjective, T>, "AddObjective only takes objective classes");
@@ -384,5 +448,6 @@ FObjectiveActivationResult FObjectiveContainer::AddObjective(UObjectiveComponent
 
 	// Handed on as a plain UClass*, which is what keeps this overload from being a candidate for its own
 	// call: TSubclassOf<T> cannot be deduced from a UClass*, so the one below is the untyped overload
-	return AddObjective(ObjectiveComponent, AIObjectiveClass.Get(), TypedInitializer, MoveTemp(OnStopped));
+	return TObjectiveActivationResult<T>::CastFrom(
+		AddObjective(ObjectiveComponent, AIObjectiveClass.Get(), TypedInitializer, MoveTemp(OnStopped)));
 }

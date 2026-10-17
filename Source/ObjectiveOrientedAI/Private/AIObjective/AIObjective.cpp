@@ -220,7 +220,11 @@ bool UAIObjective::IsInitialized() const
 
 bool UAIObjective::CanAddSubObjective(const UAIObjective* InObjective) const
 {
-	return IsInitialized() && IsPendingInvalidation() == false && InObjective != this && State != EAIObjectiveState::None;
+	// An objective which drops its sub objectives when queued would only be handed one to pause
+	const bool bRefusesWhileQueued = bClearSubObjectivesWhenQueued && IsQueued();
+
+	return IsInitialized() && IsPendingInvalidation() == false && InObjective != this && State != EAIObjectiveState::None
+		&& !bRefusesWhileQueued;
 }
 
 bool UAIObjective::Initialize(UObjectiveComponent* ObjectiveComponent)
@@ -261,7 +265,6 @@ bool UAIObjective::Initialize(UObjectiveComponent* ObjectiveComponent, TFunction
 	{
 		return false;
 	}
-
 	OnInitialized();
 
 	return true;
@@ -346,6 +349,13 @@ void UAIObjective::Enqueue()
 	State = EAIObjectiveState::Queued;
 	
 	UE_LOG(ObjectiveOrientedAI, Display, TEXT("%s was queued."), *GetName());
+
+	// Dropped before pausing, so there is nothing left to pause. Stopping them runs their user code, which
+	// is free to invalidate this objective - the check below already covers that
+	if (bClearSubObjectivesWhenQueued)
+	{
+		ObjectiveContainer.ClearObjectives();
+	}
 
 	ObjectiveContainer.SetQueued(true);
 

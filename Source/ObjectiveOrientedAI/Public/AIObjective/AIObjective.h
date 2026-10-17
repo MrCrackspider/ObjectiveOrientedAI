@@ -147,6 +147,11 @@ public:
 	 */
 	FObjectiveActivationResult AddSubObjective(UAIObjective* InAIObjective, bool bMakeCopy = false, FObjectiveStoppedDelegate OnStopped = {});
 
+	/** The same for an instance whose type is known here: the result comes back typed as it */
+	template<typename T
+		UE_REQUIRES(std::is_convertible_v<T*, UAIObjective*>)>
+	TObjectiveActivationResult<T> AddSubObjective(T* InAIObjective, bool bMakeCopy = false, FObjectiveStoppedDelegate OnStopped = {});
+
 	/** User function to invalidate this objective.
 	 *  Removes it from owning controller and calls stop if it was ever started
 	 *  @param bSuccess Flag indicates objective was finished with success
@@ -271,7 +276,15 @@ protected:
 	
 	UPROPERTY(EditAnywhere, Category = "AI Objective", AdvancedDisplay)
 	bool bCanBeQueued = true;
-	
+
+	/**
+	 * When this objective is queued, drop every sub objective rather than pause them along with it, and
+	 * take no new ones until it runs again. It resumes empty, with OnStarted told it was queued, and sets
+	 * up again from there. Sub objectives queueing one another while this objective runs are unaffected
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "AI Objective", AdvancedDisplay)
+	bool bClearSubObjectivesWhenQueued = false;
+
 	UPROPERTY(EditDefaultsOnly, Category = "AI Objective", AdvancedDisplay)
 	bool bResetSubobjectivesOnRestart = true;
 
@@ -321,4 +334,14 @@ T* UAIObjective::TryCreateSubObjective(TSubclassOf<T> Class) const
 	// Get() has already answered null for a class which does not derive from T, so the cast cannot fail -
 	// but null it may well be, since nothing which could not run here is created in the first place
 	return CastChecked<T>(TryCreateSubObjective(Class.Get()), ECastCheckedType::NullAllowed);
+}
+
+template <typename T UE_REQUIRES_DEFINITION(std::is_convertible_v<T*, UAIObjective*>)>
+TObjectiveActivationResult<T> UAIObjective::AddSubObjective(T* InAIObjective, bool bMakeCopy, FObjectiveStoppedDelegate OnStopped)
+{
+	// Handed on as a plain UAIObjective*, for which the untyped overload is the exact match and wins. Going
+	// through it rather than straight to the container keeps the one check on whether this may take a sub
+	// objective at all
+	return TObjectiveActivationResult<T>::CastFrom(
+		AddSubObjective(static_cast<UAIObjective*>(InAIObjective), bMakeCopy, MoveTemp(OnStopped)));
 }

@@ -16,7 +16,7 @@ UAIO_RunBehaviorTree* UAIO_RunBehaviorTree::MakeInstance(UBehaviorTree* InBehavi
 #if WITH_EDITOR
 FText UAIO_RunBehaviorTree::GetDebugDescription_Implementation() const
 {
-	return FText::FromString(BehaviorTree ? BehaviorTree->GetName() : TEXT("no tree"));
+	return FText::FromString(BehaviorTree ? BehaviorTree->GetName() : TEXT("No tree"));
 }
 #endif
 

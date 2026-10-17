@@ -184,7 +184,7 @@ FString FDebugInfo::ToString() const
 	// so a depth of zero out of a hand edited ini is not allowed to claim it is
 	if (CurrentObjectives.IsEmpty() && QueuedObjectives.IsEmpty() && TruncatedCount == 0)
 	{
-		AppendLine(Result, 1, FString::Printf(TEXT("%sno objectives"), ObjectiveDebug::Color::Label));
+		AppendLine(Result, 1, FString::Printf(TEXT("%sNo objectives"), ObjectiveDebug::Color::Label));
 	}
 
 	return Result;
@@ -299,16 +299,6 @@ void FDebugInfo::AppendLine(FString& OutString, int32 IndentLevel, FStringView L
 }
 
 #endif // WITH_GAMEPLAY_DEBUGGER_MENU
-
-UAIObjective* FObjectiveActivationResult::GetObjective() const
-{
-	return IsValid(Objective) ? Objective.Get() : nullptr;
-}
-
-bool FObjectiveActivationResult::WasInvalidatedDuringActivation() const
-{
-	return bActivated && !IsValid(Objective);
-}
 
 int32 FObjectiveContainer::GetNestingLevel() const
 {

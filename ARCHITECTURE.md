@@ -132,6 +132,19 @@ All go through `FObjectiveContainer`. `UObjectiveComponent::AddObjective` and
 4. **`AddInitializedObjective`** — `:355` — re-add. `CanActivate` first, then: queued → no-op;
    running → `Start()` (restart); stateless → `ActivateObjective`.
 
+Every path returns a **`TObjectiveActivationResult<T>`**; `FObjectiveActivationResult` is the alias for
+`T = UAIObjective`. It is a plain template, not a `USTRUCT` — nothing reflected uses it. It holds the
+objective in a `TWeakObjectPtr`: GC cannot see an unreflected member, so a plain pointer would dangle in a
+result kept past a purge, while the weak one answers null — and the weak one keeps nothing alive. Same
+8 bytes. The untyped paths return the alias; the typed overloads (instance `T*`,
+`TSubclassOf<T>`, explicit `T`, on the container, component and `AddSubObjective`) return it typed, so
+`GetObjective()` needs no cast. Each typed overload calls the untyped one and narrows the result through
+the private `CastFrom`, a `CastChecked` that cannot fail: the objective was handed in as a `T`, built from
+a class deriving from `T`, or copied from one, and a copy keeps its class. A typed result converts
+implicitly to any base-typed one, so existing code holding `FObjectiveActivationResult` is unaffected. The
+typed instance overloads are constrained on `T*` converting to `UAIObjective*` — without it a `UClass*`
+argument would deduce `T = UClass` and hijack the class path.
+
 `CanAddObjective` (`:225`): valid component + objective, not `bCleaningDown`, component **has a pawn**,
 **`IsCompatibleWith`**, and `FindBlockingObjective` says nothing refuses it. The objective it asks is the
 CDO on path 2 and the caller's instance/template on path 1 — in both cases **before any copy and before
@@ -157,6 +170,12 @@ trusting the snapshot, because starting one objective may move or kill the next.
 
 `StartObjective` (`:733`) calls **`CanActivate` again** and `Invalidate(false)` on failure.
 `EnqueueObjective` (`:744`) invalidates when `!bCanBeQueued`.
+
+`bClearSubObjectivesWhenQueued` on the **parent** is the other way out of pausing: `Enqueue()` calls
+`ClearObjectives()` before `SetQueued(true)`, so the sub-objectives are destroyed (`Cancelled`) instead of
+paused, and `CanAddSubObjective` refuses newcomers while the parent stays queued. It only applies to the
+parent being queued — sub-objectives held back by a sibling's rules inside a running parent still wait as
+usual. The parent resumes empty and has to rebuild from `OnStarted(bWasQueued = true)`.
 
 Array **order is priority** — `FindHeldBackCandidate` walks from the back so the last entry yields first.
 

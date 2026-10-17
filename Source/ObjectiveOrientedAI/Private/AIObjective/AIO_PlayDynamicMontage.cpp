@@ -27,7 +27,7 @@ FText UAIO_PlayDynamicMontage::GetDebugDescription_Implementation() const
 {
 	if (!AnimSequence)
 	{
-		return FText::FromString(TEXT("no sequence"));
+		return FText::FromString(TEXT("No sequence"));
 	}
 
 	return FText::FromString(FString::Printf(TEXT("%s on %s%s"),

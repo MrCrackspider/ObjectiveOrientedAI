@@ -17,7 +17,7 @@ FText UAIObjectiveComposite::GetDebugDescription_Implementation() const
 {
 	if (Composite.IsEmpty())
 	{
-		return FText::FromString(TEXT("empty"));
+		return FText::FromString(TEXT("Empty"));
 	}
 
 	const int32 DoneCount = Composite.Num() - CountAliveEntries();

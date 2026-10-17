@@ -204,10 +204,10 @@ FText UAIO_MoveTo::GetDebugDescription_Implementation() const
 
 	if (const APawn* Pawn = GetControlledPawn())
 	{
-		return FText::FromString(FString::Printf(TEXT("to %s, %.0fcm left"), *Goal, FVector::Dist(Pawn->GetActorLocation(), GoalLocation)));
+		return FText::FromString(FString::Printf(TEXT("To %s, %.0fcm left"), *Goal, FVector::Dist(Pawn->GetActorLocation(), GoalLocation)));
 	}
 
-	return FText::FromString(FString::Printf(TEXT("to %s"), *Goal));
+	return FText::FromString(FString::Printf(TEXT("To %s"), *Goal));
 }
 #endif
 

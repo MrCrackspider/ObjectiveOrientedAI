@@ -29,7 +29,7 @@ FText UAIObjectiveSequence::GetDebugDescription_Implementation() const
 {
 	if (Sequence.IsEmpty())
 	{
-		return FText::FromString(TEXT("empty"));
+		return FText::FromString(TEXT("Empty"));
 	}
 
 	FString Description = FString::Printf(TEXT("%d/%d"), CurrentObjectiveIndex + 1, Sequence.Num());
