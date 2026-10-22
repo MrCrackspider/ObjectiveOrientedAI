@@ -3,18 +3,17 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "AISystem.h"
-#include "NavFilters/NavigationQueryFilter.h"
 #include "AIObjective/AIObjective.h"
+#include "AIObjective/MoveToSettings.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "AIO_MoveTo.generated.h"
 
-/**
- * 
- */
 struct FPathFollowingResult;
 struct FAIRequestID;
 
+/**
+ * Moves the controlled pawn to an actor or a location and finishes once it gets there
+ */
 UCLASS(DisplayName = "Move To")
 class OBJECTIVEORIENTEDAI_API UAIO_MoveTo : public UAIObjective
 {
@@ -23,53 +22,40 @@ class OBJECTIVEORIENTEDAI_API UAIO_MoveTo : public UAIObjective
 	virtual bool IsCompatibleWith_Implementation(const UObjectiveComponent* ObjectiveComponent) const override;
 	virtual void OnStarted_Implementation(bool bWasQueued) override;
 	virtual void OnStopped_Implementation(const FStopReasonType& StopReason) override;
-	
+
 public:
+
+	/**
+	 * Creates an objective which moves to an actor, following it if it moves. The objective comes back
+	 * unowned and is only kept alive by the caller, so add it to a container in the same scope
+	 * @param InTargetActor  Actor to move to
+	 * @param InSettings     How to move, defaulted throughout
+	 */
+	static UAIO_MoveTo* MakeInstance(AActor* InTargetActor, const FMoveToSettings& InSettings = FMoveToSettings());
+
+	/**
+	 * Creates an objective which moves to a location. The objective comes back unowned and is only kept
+	 * alive by the caller, so add it to a container in the same scope
+	 * @param InTargetLocation  Location to move to
+	 * @param InSettings        How to move, defaulted throughout
+	 */
+	static UAIO_MoveTo* MakeInstance(const FVector& InTargetLocation, const FMoveToSettings& InSettings = FMoveToSettings());
 
 #if WITH_EDITOR
 	virtual FText GetDebugDescription_Implementation() const override;
 #endif
 
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	AActor* TargetActor = nullptr;
-	
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	FVector TargetLocation{};
+	// Actor to move to. Takes precedence over TargetLocation when set
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Move To", meta = (ExposeOnSpawn))
+	TObjectPtr<AActor> TargetActor = nullptr;
 
-	/** fixed distance added to threshold between AI and goal location in destination reach test */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn, ClampMin = "0.0", UIMin="0.0"))
-	float AcceptableRadius = GET_AI_CONFIG_VAR(AcceptanceRadius);
+	// Location to move to, used when there is no TargetActor
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Move To", meta = (ExposeOnSpawn))
+	FVector TargetLocation = FVector::ZeroVector;
 
-	/** "None" will result in default filter being used */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	TSubclassOf<UNavigationQueryFilter> FilterClass;
-
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	bool bAllowStrafe = GET_AI_CONFIG_VAR(bAllowStrafing);
-
-	/** if set, use incomplete path when goal can't be reached */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	bool bAllowPartialPath = GET_AI_CONFIG_VAR(bAcceptPartialPaths);
-
-	/** if set, the goal location will need to be navigable */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	bool bRequireNavigableEndLocation = true;
-
-	/** if set, goal location will be projected on navigation data (navmesh) before using */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	bool bProjectGoalLocation = true;
-	
-	/** if set, goal location will be projected on navigation data (navmesh) before using */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	bool bUsePathfinding = true;
-
-	/** if set, radius of AI's capsule will be added to threshold between AI and goal location in destination reach test  */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	bool bReachTestIncludesAgentRadius = GET_AI_CONFIG_VAR(bFinishMoveOnGoalOverlap);
-	
-	/** if set, radius of goal's capsule will be added to threshold between AI and goal location in destination reach test  */
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MoveTo", meta = (ExposeOnSpawn))
-	bool bReachTestIncludesGoalRadius = GET_AI_CONFIG_VAR(bFinishMoveOnGoalOverlap);
+	// How to move
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "Move To", meta = (ExposeOnSpawn))
+	FMoveToSettings MoveSettings;
 
 protected:
 	

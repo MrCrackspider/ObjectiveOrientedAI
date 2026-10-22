@@ -1,93 +1,15 @@
 
 #include "AIObjective/AIO_MoveTo.h"
 
-#include "AIController.h"
 #include "NavigationSystem.h"
 #include "ObjectiveComponent.h"
+#include "AIObjective/ObjectiveNavigationUtils.h"
 #include "GameFramework/Controller.h"
-#include "NavFilters/NavigationQueryFilter.h"
+#include "GameFramework/Pawn.h"
 #include "Navigation/PathFollowingComponent.h"
 
 namespace AIO_MoveToUtils
 {
-	/**
-	 * Path following component the controller moves with. An AI controller builds one as a named subobject
-	 * and hands it out itself, while any other controller is searched for one, which is where the objective
-	 * component puts the component it is allowed to add
-	 */
-	UPathFollowingComponent* FindPathFollowingComponent(const AController& Controller)
-	{
-		if (const AAIController* AIController = Cast<const AAIController>(&Controller))
-		{
-			return AIController->GetPathFollowingComponent();
-		}
-
-		return Controller.FindComponentByClass<UPathFollowingComponent>();
-	}
-
-	/**
-	 * Builds the pathfinding query for a request, the way an AI controller builds one for its own moves.
-	 * Everything it needs of the agent is asked for through INavAgentInterface, which every controller
-	 * implements by forwarding to its pawn, so nothing here is particular to an AI one
-	 * @return False when there is no navigation data to query, leaving OutQuery untouched
-	 */
-	bool BuildPathfindingQuery(const AController& Controller, UPathFollowingComponent& PathFollowing, const FAIMoveRequest& MoveRequest, FPathFindingQuery& OutQuery)
-	{
-		const UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(Controller.GetWorld());
-
-		if (!NavigationSystem)
-		{
-			return false;
-		}
-
-		// A request which has turned pathfinding off still goes through navigation data, just the abstract
-		// kind, which answers every query with the straight line between the two points
-		const ANavigationData* NavData = MoveRequest.IsUsingPathfinding()
-			? NavigationSystem->GetNavDataForProps(Controller.GetNavAgentPropertiesRef(), Controller.GetNavAgentLocation())
-			: NavigationSystem->GetAbstractNavData();
-
-		if (!NavData)
-		{
-			return false;
-		}
-
-		FVector GoalLocation = MoveRequest.GetGoalLocation();
-
-		if (MoveRequest.IsMoveToActorRequest())
-		{
-			// A goal which is a navigation agent itself is approached where it asks to be approached rather
-			// than at its origin, which is what stops a move onto another pawn from aiming inside it
-			if (const INavAgentInterface* NavGoal = Cast<const INavAgentInterface>(MoveRequest.GetGoalActor()))
-			{
-				const FVector Offset = NavGoal->GetMoveGoalOffset(&Controller);
-				GoalLocation = FQuatRotationTranslationMatrix(MoveRequest.GetGoalActor()->GetActorQuat(), NavGoal->GetNavAgentLocation()).TransformPosition(Offset);
-			}
-			else
-			{
-				GoalLocation = MoveRequest.GetGoalActor()->GetActorLocation();
-			}
-		}
-
-		const FSharedConstNavQueryFilter NavFilter = UNavigationQueryFilter::GetQueryFilter(*NavData, &Controller, MoveRequest.GetNavigationFilter());
-
-		OutQuery = FPathFindingQuery(Controller, *NavData, Controller.GetNavAgentLocation(), GoalLocation, NavFilter);
-		OutQuery.SetAllowPartialPaths(MoveRequest.IsUsingPartialPaths());
-		OutQuery.SetRequireNavigableEndLocation(MoveRequest.IsNavigableEndLocationRequired());
-
-		if (MoveRequest.IsApplyingCostLimitFromHeuristic())
-		{
-			const float HeuristicScale = NavFilter->GetHeuristicScale();
-			OutQuery.CostLimit = FPathFindingQuery::ComputeCostLimitFromHeuristic(
-				OutQuery.StartLocation, OutQuery.EndLocation, HeuristicScale, MoveRequest.GetCostLimitFactor(), MoveRequest.GetMinimumCostLimit());
-		}
-
-		// Lets a component which pathfinds differently, a crowd following one above all, have its say on the
-		// query before it is run
-		PathFollowing.OnPathfindingQuery(OutQuery);
-
-		return true;
-	}
-
 	/** Runs the query and keeps the path only when it came back usable */
 	void FindPath(const AController& Controller, const FAIMoveRequest& MoveRequest, FPathFindingQuery& Query, FNavPathSharedPtr& OutPath)
 	{
@@ -144,19 +66,12 @@ namespace AIO_MoveToUtils
 			// would only fail later and further in
 			if (bCanRequestMove && MoveRequest.IsProjectingGoal())
 			{
-				// Not const: the overload which projects for a nav agent rather than against named
-				// navigation data is the non const one
-				UNavigationSystemV1* NavigationSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(Controller.GetWorld());
-				FNavLocation ProjectedLocation;
+				FVector GoalLocation = MoveRequest.GetGoalLocation();
+				bCanRequestMove = ObjectiveNavigationUtils::ProjectToNavigation(Controller, GoalLocation);
 
-				if (NavigationSystem && NavigationSystem->ProjectPointToNavigation(
-						MoveRequest.GetGoalLocation(), ProjectedLocation, INVALID_NAVEXTENT, &Controller.GetNavAgentPropertiesRef()))
+				if (bCanRequestMove)
 				{
-					MoveRequest.UpdateGoalLocation(ProjectedLocation.Location);
-				}
-				else
-				{
-					bCanRequestMove = false;
+					MoveRequest.UpdateGoalLocation(GoalLocation);
 				}
 			}
 		}
@@ -172,7 +87,7 @@ namespace AIO_MoveToUtils
 		{
 			FPathFindingQuery Query;
 
-			if (BuildPathfindingQuery(Controller, PathFollowing, MoveRequest, Query))
+			if (ObjectiveNavigationUtils::BuildPathfindingQuery(Controller, PathFollowing, MoveRequest, Query))
 			{
 				FNavPathSharedPtr Path;
 				FindPath(Controller, MoveRequest, Query, Path);
@@ -194,6 +109,26 @@ namespace AIO_MoveToUtils
 
 		return ResultData;
 	}
+}
+
+UAIO_MoveTo* UAIO_MoveTo::MakeInstance(AActor* InTargetActor, const FMoveToSettings& InSettings)
+{
+	UAIO_MoveTo* Objective = NewObject<UAIO_MoveTo>();
+
+	Objective->TargetActor = InTargetActor;
+	Objective->MoveSettings = InSettings;
+
+	return Objective;
+}
+
+UAIO_MoveTo* UAIO_MoveTo::MakeInstance(const FVector& InTargetLocation, const FMoveToSettings& InSettings)
+{
+	UAIO_MoveTo* Objective = NewObject<UAIO_MoveTo>();
+
+	Objective->TargetLocation = InTargetLocation;
+	Objective->MoveSettings = InSettings;
+
+	return Objective;
 }
 
 #if WITH_EDITOR
@@ -223,15 +158,15 @@ bool UAIO_MoveTo::IsCompatibleWith_Implementation(const UObjectiveComponent* Obj
 	// Asked of the component rather than tested for on the controller: a path following component which has
 	// no movement component to drive, because nothing is possessed or the pawn cannot move, would take the
 	// request and then never go anywhere
-	const UPathFollowingComponent* PathFollowing = AIO_MoveToUtils::FindPathFollowingComponent(*Controller);
+	const UPathFollowingComponent* PathFollowing = ObjectiveNavigationUtils::FindPathFollowingComponent(*Controller);
 
-	return PathFollowing && PathFollowing->IsPathFollowingAllowed();
+	return IsValid(PathFollowing);
 }
 
 void UAIO_MoveTo::OnStarted_Implementation(bool bWasQueued)
 {
 	AController* Controller = GetOwningController();
-	UPathFollowingComponent* PathFollowing = Controller ? AIO_MoveToUtils::FindPathFollowingComponent(*Controller) : nullptr;
+	UPathFollowingComponent* PathFollowing = Controller ? ObjectiveNavigationUtils::FindPathFollowingComponent(*Controller) : nullptr;
 
 	if (!PathFollowing)
 	{
@@ -242,39 +177,14 @@ void UAIO_MoveTo::OnStarted_Implementation(bool bWasQueued)
 
 	PFComp = PathFollowing;
 
-	// An AI controller carries a default filter for its own moves, which is kept for it. No other controller
-	// has one, and a request naming no filter is served the navigation data's own default
-	TSubclassOf<UNavigationQueryFilter> NavigationFilter = FilterClass;
-
-	if (!NavigationFilter)
-	{
-		if (const AAIController* AIController = GetOwningAIController())
-		{
-			NavigationFilter = AIController->GetDefaultNavigationFilterClass();
-		}
-	}
-
-	FAIMoveRequest MoveRequest;
-	MoveRequest.SetNavigationFilter(NavigationFilter)
-	.SetAllowPartialPath(bAllowPartialPath)
-	.SetAcceptanceRadius(AcceptableRadius)
-	.SetCanStrafe(bAllowStrafe)
-	.SetReachTestIncludesAgentRadius(bReachTestIncludesAgentRadius)
-	.SetReachTestIncludesGoalRadius(bReachTestIncludesGoalRadius)
-	.SetRequireNavigableEndLocation(bRequireNavigableEndLocation)
-	.SetProjectGoalLocation(bProjectGoalLocation)
-	.SetUsePathfinding(bUsePathfinding);
+	FAIMoveRequest MoveRequest = MoveSettings.ToMoveRequest();
+	ObjectiveNavigationUtils::ApplyDefaultNavigationFilter(*Controller, MoveRequest);
 
 	TargetActor ? MoveRequest.SetGoalActor(TargetActor) : MoveRequest.SetGoalLocation(TargetLocation);
 
 	const FPathFollowingRequestResult RequestResult = AIO_MoveToUtils::RequestMove(*Controller, *PathFollowing, MoveRequest);
 
-	// The flag the request carries is only read off the AI controller, which is what sets it in
-	// AAIController::MoveTo, so the AI case keeps turning the same way it did
-	if (AAIController* AIController = GetOwningAIController())
-	{
-		AIController->bAllowStrafe = MoveRequest.CanStrafe();
-	}
+	ObjectiveNavigationUtils::ApplyStrafing(*Controller, MoveRequest);
 
 	switch (RequestResult.Code)
 	{
