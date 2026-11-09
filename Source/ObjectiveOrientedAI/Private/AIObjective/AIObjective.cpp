@@ -158,12 +158,16 @@ FString UAIObjective::GetDebugName() const
 	// generated class suffix taken off
 	if (ObjectiveClass->IsNative())
 	{
+		// GetDisplayNameText is an Editor-only API. Game build should use class name instead. 
+#if WITH_EDITOR
 		return ObjectiveClass->GetDisplayNameText().ToString();
+#else
+		return FName::NameToDisplayString(ObjectiveClass->GetName(), false);
+#endif
 	}
 
 	FString DisplayName = ObjectiveClass->GetName();
 	DisplayName.RemoveFromEnd(TEXT("_C"));
-
 	return DisplayName;
 }
 
